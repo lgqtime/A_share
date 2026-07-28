@@ -1,0 +1,16 @@
+[project]
+name = "simple-indicator-screening-ashares"
+version = "0.1.0"
+description = "Standalone Streamlit A-share technical indicator screening tool"
+requires-python = ">=3.10"
+dependencies = [
+    "altair>=6.2,<7",
+    "numpy>=1.26",
+    "openpyxl>=3.1.5",
+    "pandas>=2.2",
+    "requests>=2.32",
+    "streamlit>=1.45",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,951 @@
+{
+  "schema_version": 1,
+  "run_date": "2026-07-28",
+  "generated_at": "2026-07-27T22:17:39+00:00",
+  "best_settings": {
+    "szse_quant_filter_rsi_range": [
+      48.4,
+      54.6
+    ],
+    "szse_quant_filter_turnover_range": [
+      5.2,
+      11.8
+    ],
+    "szse_quant_filter_volume_ratio_range": [
+      1.8,
+      3.8
+    ],
+    "szse_quant_filter_pct_change_range": [
+      -1.0,
+      8.3
+    ],
+    "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+      1,
+      3
+    ],
+    "szse_quant_filter_macd_dea_minus_dif_range": [
+      0.1,
+      0.2
+    ]
+  },
+  "best_result": {
+    "settings": {
+      "szse_quant_filter_rsi_range": [
+        48.4,
+        54.6
+      ],
+      "szse_quant_filter_turnover_range": [
+        5.2,
+        11.8
+      ],
+      "szse_quant_filter_volume_ratio_range": [
+        1.8,
+        3.8
+      ],
+      "szse_quant_filter_pct_change_range": [
+        -1.0,
+        8.3
+      ],
+      "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+        1,
+        3
+      ],
+      "szse_quant_filter_macd_dea_minus_dif_range": [
+        0.1,
+        0.2
+      ]
+    },
+    "total_return_pct": 44.65039112179894,
+    "prediction_days": 9,
+    "correct_days": 8,
+    "accuracy_pct": 88.88888888888889
+  },
+  "baseline_result": {
+    "settings": {
+      "szse_quant_filter_rsi_range": [
+        49.1,
+        62.6
+      ],
+      "szse_quant_filter_turnover_range": [
+        5.4,
+        10.7
+      ],
+      "szse_quant_filter_volume_ratio_range": [
+        1.8,
+        3.8
+      ],
+      "szse_quant_filter_pct_change_range": [
+        -2.7,
+        10.1
+      ],
+      "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+        1,
+        3
+      ],
+      "szse_quant_filter_macd_dea_minus_dif_range": [
+        0.1,
+        0.2
+      ]
+    },
+    "total_return_pct": 13.264878866400732,
+    "prediction_days": 14,
+    "correct_days": 7,
+    "accuracy_pct": 50.0
+  },
+  "coordinate_search_trace": [
+    {
+      "pass": 1,
+      "parameter": "rsi",
+      "before": [
+        49.1,
+        62.6
+      ],
+      "after": [
+        48.8,
+        52.0
+      ],
+      "candidate_rows_after_other_rules": 35,
+      "candidate_intervals": 657,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.8,
+            52.0
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.4,
+            10.7
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -2.7,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 23.604367687529294,
+        "prediction_days": 6,
+        "correct_days": 4,
+        "accuracy_pct": 66.66666666666666
+      }
+    },
+    {
+      "pass": 1,
+      "parameter": "turnover",
+      "before": [
+        5.4,
+        10.7
+      ],
+      "after": [
+        4.9,
+        10.7
+      ],
+      "candidate_rows_after_other_rules": 26,
+      "candidate_intervals": 263,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.8,
+            52.0
+          ],
+          "szse_quant_filter_turnover_range": [
+            4.9,
+            10.7
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -2.7,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 25.7375792281167,
+        "prediction_days": 9,
+        "correct_days": 6,
+        "accuracy_pct": 66.66666666666666
+      }
+    },
+    {
+      "pass": 1,
+      "parameter": "volume_ratio",
+      "before": [
+        1.8,
+        3.8
+      ],
+      "after": [
+        1.9,
+        3.8
+      ],
+      "candidate_rows_after_other_rules": 32,
+      "candidate_intervals": 259,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.8,
+            52.0
+          ],
+          "szse_quant_filter_turnover_range": [
+            4.9,
+            10.7
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.9,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -2.7,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 27.38479642324487,
+        "prediction_days": 8,
+        "correct_days": 6,
+        "accuracy_pct": 75.0
+      }
+    },
+    {
+      "pass": 1,
+      "parameter": "pct_change",
+      "before": [
+        -2.7,
+        10.1
+      ],
+      "after": [
+        -2.7,
+        10.1
+      ],
+      "candidate_rows_after_other_rules": 12,
+      "candidate_intervals": 113,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.8,
+            52.0
+          ],
+          "szse_quant_filter_turnover_range": [
+            4.9,
+            10.7
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.9,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -2.7,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 27.38479642324487,
+        "prediction_days": 8,
+        "correct_days": 6,
+        "accuracy_pct": 75.0
+      }
+    },
+    {
+      "pass": 1,
+      "parameter": "kdj_age",
+      "before": [
+        1,
+        3
+      ],
+      "after": [
+        1,
+        3
+      ],
+      "candidate_rows_after_other_rules": 17,
+      "candidate_intervals": 20,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.8,
+            52.0
+          ],
+          "szse_quant_filter_turnover_range": [
+            4.9,
+            10.7
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.9,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -2.7,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 27.38479642324487,
+        "prediction_days": 8,
+        "correct_days": 6,
+        "accuracy_pct": 75.0
+      }
+    },
+    {
+      "pass": 2,
+      "parameter": "rsi",
+      "before": [
+        48.8,
+        52.0
+      ],
+      "after": [
+        48.4,
+        54.6
+      ],
+      "candidate_rows_after_other_rules": 39,
+      "candidate_intervals": 671,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            4.9,
+            10.7
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.9,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -2.7,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 37.827052990086884,
+        "prediction_days": 11,
+        "correct_days": 7,
+        "accuracy_pct": 63.63636363636363
+      }
+    },
+    {
+      "pass": 2,
+      "parameter": "turnover",
+      "before": [
+        4.9,
+        10.7
+      ],
+      "after": [
+        5.2,
+        11.8
+      ],
+      "candidate_rows_after_other_rules": 40,
+      "candidate_intervals": 640,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.9,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -2.7,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 39.12120372238817,
+        "prediction_days": 10,
+        "correct_days": 7,
+        "accuracy_pct": 70.0
+      }
+    },
+    {
+      "pass": 2,
+      "parameter": "volume_ratio",
+      "before": [
+        1.9,
+        3.8
+      ],
+      "after": [
+        1.8,
+        3.8
+      ],
+      "candidate_rows_after_other_rules": 51,
+      "candidate_intervals": 417,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -2.7,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 42.01956213327123,
+        "prediction_days": 11,
+        "correct_days": 8,
+        "accuracy_pct": 72.72727272727273
+      }
+    },
+    {
+      "pass": 2,
+      "parameter": "pct_change",
+      "before": [
+        -2.7,
+        10.1
+      ],
+      "after": [
+        -1.0,
+        8.3
+      ],
+      "candidate_rows_after_other_rules": 21,
+      "candidate_intervals": 188,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -1.0,
+            8.3
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 44.65039112179894,
+        "prediction_days": 9,
+        "correct_days": 8,
+        "accuracy_pct": 88.88888888888889
+      }
+    },
+    {
+      "pass": 2,
+      "parameter": "kdj_age",
+      "before": [
+        1,
+        3
+      ],
+      "after": [
+        1,
+        3
+      ],
+      "candidate_rows_after_other_rules": 26,
+      "candidate_intervals": 23,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -1.0,
+            8.3
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 44.65039112179894,
+        "prediction_days": 9,
+        "correct_days": 8,
+        "accuracy_pct": 88.88888888888889
+      }
+    },
+    {
+      "pass": 3,
+      "parameter": "rsi",
+      "before": [
+        48.4,
+        54.6
+      ],
+      "after": [
+        48.4,
+        54.6
+      ],
+      "candidate_rows_after_other_rules": 32,
+      "candidate_intervals": 565,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -1.0,
+            8.3
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 44.65039112179894,
+        "prediction_days": 9,
+        "correct_days": 8,
+        "accuracy_pct": 88.88888888888889
+      }
+    },
+    {
+      "pass": 3,
+      "parameter": "turnover",
+      "before": [
+        5.2,
+        11.8
+      ],
+      "after": [
+        5.2,
+        11.8
+      ],
+      "candidate_rows_after_other_rules": 37,
+      "candidate_intervals": 624,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -1.0,
+            8.3
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 44.65039112179894,
+        "prediction_days": 9,
+        "correct_days": 8,
+        "accuracy_pct": 88.88888888888889
+      }
+    },
+    {
+      "pass": 3,
+      "parameter": "volume_ratio",
+      "before": [
+        1.8,
+        3.8
+      ],
+      "after": [
+        1.8,
+        3.8
+      ],
+      "candidate_rows_after_other_rules": 37,
+      "candidate_intervals": 284,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -1.0,
+            8.3
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 44.65039112179894,
+        "prediction_days": 9,
+        "correct_days": 8,
+        "accuracy_pct": 88.88888888888889
+      }
+    },
+    {
+      "pass": 3,
+      "parameter": "pct_change",
+      "before": [
+        -1.0,
+        8.3
+      ],
+      "after": [
+        -1.0,
+        8.3
+      ],
+      "candidate_rows_after_other_rules": 21,
+      "candidate_intervals": 172,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -1.0,
+            8.3
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 44.65039112179894,
+        "prediction_days": 9,
+        "correct_days": 8,
+        "accuracy_pct": 88.88888888888889
+      }
+    },
+    {
+      "pass": 3,
+      "parameter": "kdj_age",
+      "before": [
+        1,
+        3
+      ],
+      "after": [
+        1,
+        3
+      ],
+      "candidate_rows_after_other_rules": 26,
+      "candidate_intervals": 23,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            48.4,
+            54.6
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            11.8
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.8,
+            3.8
+          ],
+          "szse_quant_filter_pct_change_range": [
+            -1.0,
+            8.3
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            1,
+            3
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 44.65039112179894,
+        "prediction_days": 9,
+        "correct_days": 8,
+        "accuracy_pct": 88.88888888888889
+      }
+    }
+  ],
+  "data_window": {
+    "return_workbook": "D:\\SimpleIndicatorScreening_ASharess\\strategy_backtest\\outputs\\input_data\\深市主板每日涨跌幅_2025-10-29_2026-07-27.xlsx",
+    "first_signal_date": "2026-06-29",
+    "last_signal_date": "2026-07-24",
+    "last_verification_date": "2026-07-27",
+    "lookback_signal_days": 20
+  },
+  "starter_source": "当前日期之前最近一次有效优化结果；没有时使用程序默认值",
+  "initial_settings": {
+    "szse_quant_filter_rsi_range": [
+      49.1,
+      62.6
+    ],
+    "szse_quant_filter_turnover_range": [
+      5.4,
+      10.7
+    ],
+    "szse_quant_filter_volume_ratio_range": [
+      1.8,
+      3.8
+    ],
+    "szse_quant_filter_pct_change_range": [
+      -2.7,
+      10.1
+    ],
+    "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+      1,
+      3
+    ],
+    "szse_quant_filter_macd_dea_minus_dif_range": [
+      0.1,
+      0.2
+    ]
+  },
+  "screening_settings": {
+    "szse_quant_filter_above_ma5": true,
+    "szse_quant_filter_above_ma20": true,
+    "szse_quant_filter_ma5_above_ma20": false,
+    "szse_quant_filter_platform_breakout_20d": false,
+    "szse_quant_filter_ma5_rising": false,
+    "szse_quant_filter_close_near_daily_high": false,
+    "szse_quant_filter_rsi_in_range": true,
+    "szse_quant_filter_rsi_range": [
+      48.4,
+      54.6
+    ],
+    "szse_quant_filter_macd_bullish": true,
+    "szse_quant_filter_macd_golden_cross": false,
+    "szse_quant_filter_macd_golden_cross_lookback_days": 3,
+    "szse_quant_filter_macd_bearish": false,
+    "szse_quant_filter_macd_dead_cross": false,
+    "szse_quant_filter_macd_dea_minus_dif_high": false,
+    "szse_quant_filter_macd_dea_minus_dif_range": [
+      0.1,
+      0.2
+    ],
+    "szse_quant_filter_kdj_healthy_golden_cross_3d": true,
+    "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+      1,
+      3
+    ],
+    "szse_quant_filter_volume_breakout": true,
+    "szse_quant_filter_volume_ratio_range": [
+      1.8,
+      3.8
+    ],
+    "szse_quant_filter_volume_ratio_threshold": 1.5,
+    "szse_quant_filter_amount_at_least_100m": true,
+    "szse_quant_filter_turnover_in_range": true,
+    "szse_quant_filter_turnover_range": [
+      5.2,
+      11.8
+    ],
+    "szse_quant_filter_float_market_cap_in_range": false,
+    "szse_quant_filter_float_market_cap_range_yi": [
+      50.0,
+      200.0
+    ],
+    "szse_quant_filter_positive_change": false,
+    "szse_quant_filter_pct_change_in_range": true,
+    "szse_quant_filter_pct_change_range": [
+      -1.0,
+      8.3
+    ],
+    "szse_quant_filter_amplitude_high": false,
+    "szse_quant_filter_amplitude_threshold": 3.0,
+    "szse_quant_filter_require_all": true,
+    "szse_quant_risk_bias_high": true,
+    "szse_quant_risk_upper_shadow": false,
+    "szse_quant_risk_resistance_60_day": true,
+    "szse_quant_risk_candlestick_patterns": [
+      "doji_3d",
+      "inverted_t_doji_3d",
+      "hanging_man_3d"
+    ]
+  },
+  "fixed_selected_conditions": {
+    "above_ma5": true,
+    "above_ma20": true,
+    "ma5_above_ma20": false,
+    "rsi_in_range": true,
+    "macd_bullish": true,
+    "macd_golden_cross": false,
+    "macd_bearish": false,
+    "macd_dead_cross": false,
+    "macd_dea_minus_dif_high": false,
+    "kdj_healthy_golden_cross_3d": true,
+    "platform_breakout_20d": false,
+    "ma5_rising": false,
+    "close_near_daily_high": false,
+    "volume_breakout": true,
+    "amount_at_least_100m": true,
+    "turnover_in_range": true,
+    "float_market_cap_in_range": false,
+    "positive_change": false,
+    "pct_change_in_range": true,
+    "amplitude_high": false
+  },
+  "fixed_risk_filters": {
+    "bias_high": true,
+    "upper_shadow": false,
+    "resistance_60_day": true,
+    "doji_3d": true,
+    "inverted_t_doji_3d": true,
+    "hanging_man_3d": true,
+    "long_upper_shadow_bullish_3d": false,
+    "extreme_bullish_3d": false
+  },
+  "minimum_prediction_days": 4,
+  "history_summary": {
+    "股票总数": 1486,
+    "历史成功": 1486,
+    "历史失败": 0,
+    "历史获取失败股票数": 0,
+    "历史预热不足股票数": 6,
+    "历史自动剔除股票数": 6,
+    "历史有效股票数": 1480,
+    "历史缓存命中": 1486
+  },
+  "factor_error_count": 22,
+  "factor_row_count": 29540,
+  "stock_pool_rows_before_exclusion": 1493,
+  "stock_pool_rows_used": 1486,
+  "return_failure_stocks_excluded": 7,
+  "backtest_summary": {
+    "最终统计": "8/9，44.65%",
+    "预测正确天数": 8,
+    "预测天数": 9,
+    "失败预测天数": 1,
+    "预测错误天数": 1,
+    "未预测天数": 11,
+    "总天数": 20,
+    "预测正确率（%）": 88.88888888888889,
+    "总收益率（%）": 44.65039112179894,
+    "日历选股日数": 20,
+    "数据不完整天数": 0,
+    "有信号天数": 10,
+    "无信号天数": 10,
+    "次日收益缺失天数": 1,
+    "策略满分": 9.5,
+    "持仓规则": "每个选股日仅买入筛选结果第一名；同分依次按量比、收盘日内位置和成交额降序。",
+    "收益规则": "严格下一市场交易日收盘相对选股日收盘的前复权涨跌幅；未预测日按 0% 计入复利。",
+    "预测正确规则": "仅选中股票且存在严格下一交易日收益时形成预测；涨幅大于 0% 记为正确，其余预测记为失败。"
+  }
+}
