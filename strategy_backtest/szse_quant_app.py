@@ -32,7 +32,6 @@ import pandas as pd
 import requests
 import streamlit as st
 
-
 MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_WORKBOOK_PATH = MODULE_DIR / "深交所数据.xlsx"
 CACHE_DIR = MODULE_DIR / "data_cache" / "szse_quant"
@@ -40,7 +39,7 @@ OPTIMIZED_PARAMETER_FILE = (
     MODULE_DIR
     / "outputs"
     / "rolling_parameter_updates"
-    / "rolling_parameter_optimization_2026-07-28.json"
+    / "rolling_parameter_optimization_current.json"
 )
 
 EASTMONEY_DAILY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
@@ -73,6 +72,10 @@ FACTOR_CACHE_VERSION = 12
 SOURCE_FAILURE_THRESHOLD = 3
 SOURCE_COOLDOWN_SECONDS = 30.0
 DATA_PIPELINE_VERSION = "qfq-platform-v18"
+UNKNOWN_INDUSTRY = "未分类"
+PREDICTION_REVIEW_TOP_N = 50
+PREDICTION_REVIEW_RANK_COLUMN = "排名（风险过滤后）"
+PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN = "入选数（前50）"
 
 KDJ_RSV_PERIOD = 89
 KDJ_K_SMOOTHING_PERIOD = 3
@@ -275,6 +278,10 @@ COLLECTION_SESSION_STATE_KEYS = (
     "szse_quant_as_of_date",
     "szse_quant_results_as_of_date",
     "szse_quant_results_max_score",
+    "szse_quant_ranked_top_50",
+    # 清理上一版预测页留下的自动行业共识结果。
+    "szse_quant_industry_consensus",
+    "szse_quant_industry_consensus_message",
 )
 
 SCREENING_RESULT_SESSION_STATE_KEYS = (
@@ -283,6 +290,10 @@ SCREENING_RESULT_SESSION_STATE_KEYS = (
     "szse_quant_risk_excluded_count",
     "szse_quant_results_as_of_date",
     "szse_quant_results_max_score",
+    "szse_quant_ranked_top_50",
+    # 清理上一版预测页留下的自动行业共识结果。
+    "szse_quant_industry_consensus",
+    "szse_quant_industry_consensus_message",
 )
 
 # The rolling optimizer only searches these interval controls.  Loading its
@@ -457,8 +468,37 @@ def _as_six_digit_code(value: object) -> str | None:
     return None
 
 
+def _industry_or_unknown(value: object) -> str:
+    """规范化行业文本；旧版股票池缺列时明确标记为未分类。"""
+
+    if value is None:
+        return UNKNOWN_INDUSTRY
+    try:
+        if bool(pd.isna(value)):
+            return UNKNOWN_INDUSTRY
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    if text.casefold() in {"", "nan", "none", "nat", "<na>"}:
+        return UNKNOWN_INDUSTRY
+    return text
+
+
+def _industry_is_blank(value: object) -> bool:
+    """识别 Excel 空单元格与常见缺失占位，供正式股票池完整性校验使用。"""
+
+    if value is None:
+        return True
+    try:
+        if bool(pd.isna(value)):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().casefold() in {"", "nan", "none", "nat", "<na>"}
+
+
 def load_mainboard_companies(workbook_path: Path) -> pd.DataFrame:
-    """读取 Excel 的“主板公司”表，返回稳定顺序的代码和名称。"""
+    """读取经官方字段校验的“主板公司”表，返回代码、名称和行业。"""
 
     if not workbook_path.is_file():
         raise FileNotFoundError(
@@ -470,21 +510,34 @@ def load_mainboard_companies(workbook_path: Path) -> pd.DataFrame:
     except ValueError as exc:
         raise ValueError("Excel 中没有“主板公司”工作表。") from exc
 
-    required_columns = {"公司代码", "公司简称"}
+    required_columns = {"公司代码", "公司简称", "所属行业"}
     missing_columns = required_columns.difference(frame.columns)
     if missing_columns:
         missing_text = "、".join(sorted(missing_columns))
         raise ValueError(f"“主板公司”工作表缺少必要列：{missing_text}。")
 
-    companies = frame.loc[:, ["公司代码", "公司简称"]].copy()
+    companies = frame.loc[:, ["公司代码", "公司简称", "所属行业"]].copy()
     companies = companies.rename(
         columns={"公司代码": "股票代码", "公司简称": "股票名称"}
     )
     companies["股票代码"] = companies["股票代码"].map(_as_six_digit_code)
     companies["股票名称"] = companies["股票名称"].fillna("").astype(str).str.strip()
-    companies = companies.dropna(subset=["股票代码"])
-    companies = companies.loc[companies["股票名称"].ne("")]
-    companies = companies.drop_duplicates(subset=["股票代码"], keep="first").reset_index(drop=True)
+    invalid_code_count = int(companies["股票代码"].isna().sum())
+    blank_name_count = int(companies["股票名称"].eq("").sum())
+    blank_industry_count = int(companies["所属行业"].map(_industry_is_blank).sum())
+    duplicate_code_count = int(companies["股票代码"].duplicated(keep=False).sum())
+    if invalid_code_count or blank_name_count or blank_industry_count or duplicate_code_count:
+        details = []
+        if invalid_code_count:
+            details.append(f"无效股票代码 {invalid_code_count} 条")
+        if blank_name_count:
+            details.append(f"空公司简称 {blank_name_count} 条")
+        if blank_industry_count:
+            details.append(f"空所属行业 {blank_industry_count} 条")
+        if duplicate_code_count:
+            details.append(f"重复股票代码 {duplicate_code_count} 条")
+        raise ValueError("“主板公司”工作表数据不完整：" + "；".join(details) + "。")
+    companies["所属行业"] = companies["所属行业"].map(_industry_or_unknown)
     if companies.empty:
         raise ValueError("“主板公司”工作表中没有可用的股票代码。")
     # 序号来自原始主板公司清单。得分相同的股票按这个序号排序。
@@ -1839,6 +1892,7 @@ def collect_factor_frame(
                             "序号": company["序号"],
                             "股票代码": code,
                             "股票名称": name,
+                            "所属行业": _industry_or_unknown(company.get("所属行业")),
                             "数据来源": outcome.source or "未知来源",
                             "缓存命中": outcome.from_cache,
                             **factor_values,
@@ -2493,6 +2547,91 @@ def score_and_select(
     )
 
 
+def _ranked_candidates_with_industry(
+    ranked_candidates: pd.DataFrame,
+    factors: pd.DataFrame,
+) -> pd.DataFrame:
+    """为已排序候选附加行业，且不改变原有排名或 Top 10 展示数据。"""
+
+    candidates = ranked_candidates.copy()
+    if "所属行业" not in candidates:
+        if {"股票代码", "所属行业"}.issubset(factors.columns):
+            industry_lookup = factors.loc[:, ["股票代码", "所属行业"]].copy()
+            industry_lookup["股票代码"] = industry_lookup["股票代码"].astype(str)
+            industry_by_code = (
+                industry_lookup.drop_duplicates(subset=["股票代码"], keep="first")
+                .set_index("股票代码")["所属行业"]
+            )
+            candidates["所属行业"] = candidates["股票代码"].astype(str).map(
+                industry_by_code
+            )
+        else:
+            candidates["所属行业"] = UNKNOWN_INDUSTRY
+    candidates["所属行业"] = candidates["所属行业"].map(_industry_or_unknown)
+    return candidates
+
+
+def prepare_prediction_review_candidates(
+    ranked_candidates: pd.DataFrame,
+    factors: pd.DataFrame,
+) -> pd.DataFrame:
+    """整理风险过滤后的前 50 名，供人工按行业判断。"""
+
+    candidates = _ranked_candidates_with_industry(ranked_candidates, factors).head(
+        PREDICTION_REVIEW_TOP_N
+    )
+    if candidates.empty:
+        return candidates
+
+    candidates = candidates.reset_index(drop=True)
+    candidates.insert(
+        0,
+        PREDICTION_REVIEW_RANK_COLUMN,
+        range(1, len(candidates) + 1),
+    )
+    leading_columns = (
+        PREDICTION_REVIEW_RANK_COLUMN,
+        "股票代码",
+        "股票名称",
+        "所属行业",
+        "得分",
+    )
+    ordered_columns = [
+        column for column in leading_columns if column in candidates.columns
+    ]
+    ordered_columns.extend(
+        column for column in candidates.columns if column not in ordered_columns
+    )
+    return candidates.loc[:, ordered_columns]
+
+
+def summarize_prediction_review_industries(
+    review_candidates: pd.DataFrame,
+) -> pd.DataFrame:
+    """汇总风险过滤后前 50 名中各行业的入选数量。"""
+
+    summary_columns = ["所属行业", PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN]
+    candidates = review_candidates.head(PREDICTION_REVIEW_TOP_N)
+    if candidates.empty:
+        return pd.DataFrame(columns=summary_columns)
+
+    if "所属行业" in candidates:
+        industries = candidates["所属行业"].map(_industry_or_unknown)
+    else:
+        industries = pd.Series(UNKNOWN_INDUSTRY, index=candidates.index)
+    industry_summary = (
+        industries.value_counts()
+        .rename(PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN)
+        .rename_axis("所属行业")
+        .reset_index()
+    )
+    return industry_summary.sort_values(
+        [PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN, "所属行业"],
+        ascending=[False, True],
+        kind="stable",
+    ).reset_index(drop=True)
+
+
 def clear_disk_cache() -> None:
     """仅删除本应用自己的缓存目录，不触碰项目其他数据。"""
 
@@ -2974,6 +3113,7 @@ def _render_factor_status() -> None:
             "序号",
             "股票代码",
             "股票名称",
+            "所属行业",
             "数据日期",
             "收盘价",
             "MA5",
@@ -3061,6 +3201,27 @@ def _render_results(as_of_date: date | datetime | None = None) -> None:
             file_name=f"深市主板量化筛选结果_{result_as_of_date}.csv",
             mime="text/csv",
         )
+        review_candidates = st.session_state.get("szse_quant_ranked_top_50")
+        if isinstance(review_candidates, pd.DataFrame) and not review_candidates.empty:
+            st.subheader("风险过滤后评分排名第一（含所属行业）")
+            st.dataframe(
+                review_candidates.head(1),
+                hide_index=True,
+                width="stretch",
+            )
+            st.subheader(f"风险过滤后前 {len(review_candidates)} 名（含所属行业）")
+            st.dataframe(
+                review_candidates,
+                hide_index=True,
+                width="stretch",
+                height=720,
+            )
+            st.subheader(f"当日前 {len(review_candidates)} 名行业入选数量")
+            st.dataframe(
+                summarize_prediction_review_industries(review_candidates),
+                hide_index=True,
+                width="stretch",
+            )
 
 
 def _ensure_current_data_pipeline() -> None:
@@ -3068,8 +3229,13 @@ def _ensure_current_data_pipeline() -> None:
 
     if st.session_state.get("szse_quant_pipeline_version") == DATA_PIPELINE_VERSION:
         results = st.session_state.get("szse_quant_results")
-        if isinstance(results, pd.DataFrame) and "未满足条件（扣分项）" not in results:
-            _clear_screening_result_session_state()
+        if isinstance(results, pd.DataFrame):
+            review_candidates = st.session_state.get("szse_quant_ranked_top_50")
+            if (
+                "未满足条件（扣分项）" not in results
+                or not isinstance(review_candidates, pd.DataFrame)
+            ):
+                _clear_screening_result_session_state()
         return
     _clear_collection_session_state()
     st.session_state["szse_quant_pipeline_version"] = DATA_PIPELINE_VERSION
@@ -3138,22 +3304,28 @@ def main() -> None:
                     ),
                     "require_all": bool(settings["require_all"]),
                 }
-                results, eligible_count, risk_excluded_count = score_and_select(
+                ranked_candidates, eligible_count, risk_excluded_count = score_and_select(
                     factors,
                     settings["selected"],
                     selected_risks=settings["selected_risks"],
-                    top_n=10,
+                    top_n=PREDICTION_REVIEW_TOP_N,
                     **score_options,
+                )
+                results = ranked_candidates.head(10).reset_index(drop=True)
+                review_candidates = prepare_prediction_review_candidates(
+                    ranked_candidates,
+                    factors,
                 )
                 st.session_state["szse_quant_results"] = results
                 st.session_state["szse_quant_eligible_count"] = eligible_count
                 st.session_state["szse_quant_risk_excluded_count"] = risk_excluded_count
                 st.session_state["szse_quant_results_as_of_date"] = target_day.isoformat()
                 st.session_state["szse_quant_results_max_score"] = max_score
+                st.session_state["szse_quant_ranked_top_50"] = review_candidates
                 if eligible_count:
                     st.success(
                         f"当前满分 {max_score:g} 分；风险过滤剔除 {risk_excluded_count} 只股票；"
-                        f"共有 {eligible_count} 只股票进入当前规则排序，已展示前 10 名。"
+                        f"共有 {eligible_count} 只股票进入当前规则排序，已展示前 10 名和前 50 名。"
                     )
                 else:
                     st.warning(

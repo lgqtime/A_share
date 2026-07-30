@@ -65,6 +65,7 @@ class BacktestReturnCorrectionTests(unittest.TestCase):
                     "序号": 1,
                     "股票代码": "000001",
                     "股票名称": "测试股",
+                    "所属行业": "测试行业",
                     "数据日期": signal_day.isoformat(),
                     "数据来源": "测试",
                     "当日成交额": 100_000_000.0,

@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "trading_day": "2026-07-29",
+  "stages": {
+    "monitor": {
+      "updated_at": "2026-07-29T10:11:39.723476+08:00",
+      "status": "completed",
+      "result": {
+        "预测日期": "2026-07-28",
+        "数据截至日期": "2026-07-28",
+        "预测状态": "风险过滤后无第一名",
+        "预测股票代码": null,
+        "预测股票名称": null,
+        "预测所属行业": null,
+        "预测排名": null,
+        "预测得分": null,
+        "风险过滤后候选数": "0",
+        "未过滤前50数": "50",
+        "监控日期": "2026-07-29",
+        "实时状态": "无信号",
+        "实时股票代码": null,
+        "实时股票名称": null,
+        "实时所属行业": null,
+        "实时候选排名": null,
+        "实时最新价": null,
+        "实时昨收价": null,
+        "实时跌幅（%）": null,
+        "实时触发时间": null,
+        "行情更新时间": null,
+        "更新时间": "2026-07-29T10:00:00.096672+08:00",
+        "备注": "09:30-10:00内没有候选股触及-8.5%。"
+      },
+      "recovered_from_archive": true
+    },
+    "after_close": {
+      "updated_at": "2026-07-30T05:08:30.863827+08:00",
+      "status": "completed",
+      "factor_summary": {
+        "总数": 1486,
+        "缓存命中": 0,
+        "成功": 1478,
+        "失败": 8,
+        "有效因子": 1478,
+        "排除": 8,
+        "收益异常排除": 7
+      },
+      "excluded_factor_codes": [
+        "001220",
+        "001237",
+        "001248",
+        "001257",
+        "001312",
+        "001325",
+        "001369",
+        "001396"
+      ],
+      "excluded_factor_count": 8,
+      "return_failure_codes": [
+        "000820",
+        "001330",
+        "001365",
+        "001393",
+        "001399",
+        "002036",
+        "002828"
+      ],
+      "missing_return_codes": [
+        "000820"
+      ],
+      "return_excluded_codes": [
+        "000820",
+        "001330",
+        "001365",
+        "001393",
+        "001399",
+        "002036",
+        "002828"
+      ],
+      "return_excluded_count": 7,
+      "stock_pool": {
+        "status": "fallback",
+        "source_day": "2026-07-28",
+        "fallback_reason": "连续 3 次均未能从深交所公开接口获取有效 JSON：('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+      },
+      "return_rows_appended": 0,
+      "fixed_parameter_file": "D:\\IndicatorScreening_Asheres\\strategy_backtest\\outputs\\rolling_parameter_updates\\rolling_parameter_optimization_current.json",
+      "top_fifty_file": "D:\\IndicatorScreening_Asheres\\前 50 名（含所属行业）.csv",
+      "combined_signal_file": "D:\\IndicatorScreening_Asheres\\每日交易信号.csv"
+    }
+  },
+  "notifications": {
+    "monitor": {
+      "status": "sent",
+      "sent_at": "2026-07-29T10:00:00.848677+08:00",
+      "title": "深市主板实时检测 2026-07-29"
+    },
+    "prediction": {
+      "status": "sent",
+      "sent_at": "2026-07-30T05:08:32.573788+08:00",
+      "title": "深市主板每日预测 2026-07-29"
+    }
+  }
+}

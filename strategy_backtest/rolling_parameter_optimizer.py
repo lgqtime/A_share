@@ -23,22 +23,23 @@ import pandas as pd
 
 try:  # 支持 `python -m` 与直接执行两种方式。
     from . import backtest_core as core
-    from . import szse_quant_app as strategy_app
+    from .runtime_strategy import strategy_app
 except ImportError:  # pragma: no cover - 直接执行脚本时使用。
     import backtest_core as core
-    import szse_quant_app as strategy_app
+    from runtime_strategy import strategy_app
 
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = MODULE_DIR / "outputs" / "rolling_parameter_updates"
 DEFAULT_STOCK_POOL = PROJECT_DIR / "深交所数据.xlsx"
-DEFAULT_LOOKBACK_DAYS = 20
+DEFAULT_LOOKBACK_DAYS = 30
 DEFAULT_MAX_PASSES = 4
 DEFAULT_CONFIRM_TOP = 3
 DEFAULT_BATCH_SIZE = 2_048
 FACTOR_WORKERS = max(1, min(core.MAX_FACTOR_WORKERS, 8))
 REPORT_PREFIX = "rolling_parameter_optimization_"
+CURRENT_PARAMETER_FILENAME = "rolling_parameter_optimization_current.json"
 BACKTEST_PREFIX = "rolling_parameter_backtest_"
 BACKTEST_REPORT_TYPE = "rolling_parameter_backtest"
 BACKTEST_WORKSHEET_NAMES = (
@@ -308,7 +309,7 @@ def load_previous_settings(
     cutoff = _as_date(as_of_date)
     candidates: list[tuple[date, Path]] = []
     if output_dir.is_dir():
-        for report_path in output_dir.glob(f"{REPORT_PREFIX}*.json"):
+        for report_path in output_dir.glob(f"{REPORT_PREFIX}????-??-??.json"):
             try:
                 payload = json.loads(report_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -1108,13 +1109,14 @@ def persist_optimization_result(
     metadata: Mapping[str, object] | None = None,
     data_problems: pd.DataFrame | None = None,
 ) -> tuple[Path, Path]:
-    """以运行日期写入可继承参数 JSON 和完整的回测报告 JSON。"""
+    """写入日期参数、固定当前参数和完整的回测报告 JSON。"""
 
     run_day = _as_date(as_of_date)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     date_label = run_day.isoformat()
     json_path = output_dir / f"{REPORT_PREFIX}{date_label}.json"
+    current_json_path = output_dir / CURRENT_PARAMETER_FILENAME
     report_path = output_dir / f"{BACKTEST_PREFIX}{date_label}.json"
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     payload: dict[str, object] = {
@@ -1132,6 +1134,7 @@ def persist_optimization_result(
         payload.update(_json_safe(dict(metadata)))
 
     _write_json_atomically(json_path, payload)
+    _write_json_atomically(current_json_path, payload)
 
     parameter_rows = _settings_rows(result.settings, "最优参数")
     if baseline_result is not None:
@@ -1248,7 +1251,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--lookback-days",
         type=int,
         default=DEFAULT_LOOKBACK_DAYS,
-        help="向前使用的实际可验证选股日数量，默认20。",
+        help="向前使用的实际可验证选股日数量，默认30。",
     )
     parser.add_argument(
         "--minimum-prediction-days",
@@ -1429,6 +1432,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         flush=True,
     )
     print(f"参数文件：{json_path}", flush=True)
+    print(
+        f"当前参数文件：{Path(args.output_dir) / CURRENT_PARAMETER_FILENAME}",
+        flush=True,
+    )
     print(f"回测报告：{report_path}", flush=True)
     return 0
 

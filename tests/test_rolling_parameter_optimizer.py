@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import date
 import json
 from pathlib import Path
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 
 import pandas as pd
 
+import szse_quant_app as root_strategy_app
 from strategy_backtest import backtest_core as core
 from strategy_backtest import rolling_parameter_optimizer as optimizer
 from strategy_backtest import szse_quant_app as strategy_app
@@ -103,8 +106,73 @@ class PreviousSettingsTests(unittest.TestCase):
         self.assertEqual(loaded, DEFAULT_SETTINGS)
         self.assertIsNot(loaded, DEFAULT_SETTINGS)
 
+    def test_current_parameter_file_is_not_used_as_a_historical_starter(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            output_dir = Path(temporary_directory)
+            self._write_report(
+                output_dir / optimizer.CURRENT_PARAMETER_FILENAME,
+                _settings_with_rsi(45.0, 70.0),
+            )
+            loaded = optimizer.load_previous_settings(
+                output_dir,
+                DEFAULT_SETTINGS,
+                as_of_date=date(2026, 7, 27),
+            )
+
+        self.assertEqual(loaded, DEFAULT_SETTINGS)
+
 
 class RecentSignalDateTests(unittest.TestCase):
+    def test_optimizer_and_backtest_core_use_the_production_strategy_module(self) -> None:
+        root_path = Path(root_strategy_app.__file__).resolve()
+        self.assertEqual(Path(optimizer.strategy_app.__file__).resolve(), root_path)
+        self.assertEqual(Path(core.strategy_app.__file__).resolve(), root_path)
+        self.assertIs(optimizer.strategy_app, core.strategy_app)
+
+    def test_runtime_strategy_ignores_a_legacy_top_level_module_name_collision(
+        self,
+    ) -> None:
+        project_dir = Path(__file__).resolve().parents[1]
+        legacy_path = project_dir / "strategy_backtest" / "szse_quant_app.py"
+        root_path = project_dir / "szse_quant_app.py"
+        script = f"""
+import importlib.util
+from pathlib import Path
+import sys
+
+legacy_path = Path({str(legacy_path)!r})
+root_path = Path({str(root_path)!r}).resolve()
+legacy_spec = importlib.util.spec_from_file_location("szse_quant_app", legacy_path)
+assert legacy_spec is not None and legacy_spec.loader is not None
+legacy_module = importlib.util.module_from_spec(legacy_spec)
+sys.modules["szse_quant_app"] = legacy_module
+legacy_spec.loader.exec_module(legacy_module)
+
+from strategy_backtest import runtime_strategy
+
+resolved_path = Path(runtime_strategy.strategy_app.__file__).resolve()
+assert resolved_path == root_path, (
+    f"runtime strategy loaded {{resolved_path}}, expected {{root_path}}"
+)
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f"subprocess failed:\\nstdout:\\n{completed.stdout}\\nstderr:\\n{completed.stderr}",
+        )
+
+    def test_default_lookback_is_thirty_trading_days(self) -> None:
+        self.assertEqual(optimizer.DEFAULT_LOOKBACK_DAYS, 30)
+        self.assertEqual(optimizer.parse_args([]).lookback_days, 30)
+
     def test_selects_only_the_requested_count_of_recent_verifiable_signal_days(self) -> None:
         first = date(2026, 7, 20)
         second = date(2026, 7, 21)
@@ -225,16 +293,20 @@ class ResultPersistenceTests(unittest.TestCase):
             )
             self.assertTrue(json_path.is_file())
             self.assertTrue(report_path.is_file())
+            current_path = output_dir / optimizer.CURRENT_PARAMETER_FILENAME
+            self.assertTrue(current_path.is_file())
             self.assertFalse(
                 (output_dir / "rolling_parameter_backtest_2026-07-27.xlsx").exists()
             )
             payload = json.loads(json_path.read_text(encoding="utf-8"))
+            current_payload = json.loads(current_path.read_text(encoding="utf-8"))
             report = json.loads(report_path.read_text(encoding="utf-8"))
 
         self.assertIn("2026-07-27", json_path.name)
         self.assertIn("2026-07-27", report_path.name)
         self.assertEqual(report_path.suffix, ".json")
         self.assertEqual(payload["run_date"], "2026-07-27")
+        self.assertEqual(current_payload, payload)
         self.assertEqual(
             payload["best_settings"]["szse_quant_filter_rsi_range"], [47.5, 61.6]
         )
@@ -351,6 +423,7 @@ class CoordinateSearchTests(unittest.TestCase):
             return {
                 "股票代码": "000001",
                 "股票名称": "测试公司",
+                "所属行业": "测试行业",
                 "数据日期": signal_day.isoformat(),
                 "数据来源": "测试",
                 "站上MA5": True,

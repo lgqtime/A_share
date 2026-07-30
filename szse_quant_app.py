@@ -40,8 +40,9 @@ OPTIMIZED_PARAMETER_FILE = (
     / "strategy_backtest"
     / "outputs"
     / "rolling_parameter_updates"
-    / "rolling_parameter_optimization_2026-07-28.json"
+    / "rolling_parameter_optimization_current.json"
 )
+OPTIMIZED_PARAMETER_ERROR_STATE_KEY = "szse_quant_optimized_parameter_error"
 
 EASTMONEY_DAILY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 TENCENT_RICH_DAILY_KLINE_URLS = (
@@ -72,7 +73,12 @@ CACHE_SCHEMA_VERSION = 5
 FACTOR_CACHE_VERSION = 12
 SOURCE_FAILURE_THRESHOLD = 3
 SOURCE_COOLDOWN_SECONDS = 30.0
-DATA_PIPELINE_VERSION = "qfq-platform-v18"
+DATA_PIPELINE_VERSION = "qfq-platform-v19"
+UNKNOWN_INDUSTRY = "未分类"
+PREDICTION_REVIEW_TOP_N = 50
+PREDICTION_REVIEW_RANK_COLUMN = "评分排名"
+PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN = "入选数（前50）"
+PREDICTION_REVIEW_EXPORT_PATH = MODULE_DIR / "前 50 名（含所属行业）.csv"
 
 KDJ_RSV_PERIOD = 89
 KDJ_K_SMOOTHING_PERIOD = 3
@@ -289,6 +295,10 @@ COLLECTION_SESSION_STATE_KEYS = (
     "szse_quant_as_of_date",
     "szse_quant_results_as_of_date",
     "szse_quant_results_max_score",
+    "szse_quant_ranked_top_50",
+    # 清理上一版预测页留下的自动行业共识结果。
+    "szse_quant_industry_consensus",
+    "szse_quant_industry_consensus_message",
 )
 
 SCREENING_RESULT_SESSION_STATE_KEYS = (
@@ -297,6 +307,10 @@ SCREENING_RESULT_SESSION_STATE_KEYS = (
     "szse_quant_risk_excluded_count",
     "szse_quant_results_as_of_date",
     "szse_quant_results_max_score",
+    "szse_quant_ranked_top_50",
+    # 清理上一版预测页留下的自动行业共识结果。
+    "szse_quant_industry_consensus",
+    "szse_quant_industry_consensus_message",
 )
 
 # The rolling optimizer only searches these interval controls.  Loading its
@@ -421,6 +435,7 @@ def _request_session() -> requests.Session:
     session = getattr(_THREAD_LOCAL, "session", None)
     if session is None:
         session = requests.Session()
+        session.trust_env = False
         session.headers.update(
             {
                 "User-Agent": USER_AGENT,
@@ -471,8 +486,37 @@ def _as_six_digit_code(value: object) -> str | None:
     return None
 
 
+def _industry_or_unknown(value: object) -> str:
+    """规范化行业文本；旧版股票池缺列时明确标记为未分类。"""
+
+    if value is None:
+        return UNKNOWN_INDUSTRY
+    try:
+        if bool(pd.isna(value)):
+            return UNKNOWN_INDUSTRY
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    if text.casefold() in {"", "nan", "none", "nat", "<na>"}:
+        return UNKNOWN_INDUSTRY
+    return text
+
+
+def _industry_is_blank(value: object) -> bool:
+    """识别 Excel 空单元格与常见缺失占位，供正式股票池完整性校验使用。"""
+
+    if value is None:
+        return True
+    try:
+        if bool(pd.isna(value)):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().casefold() in {"", "nan", "none", "nat", "<na>"}
+
+
 def load_mainboard_companies(workbook_path: Path) -> pd.DataFrame:
-    """读取 Excel 的“主板公司”表，返回稳定顺序的代码和名称。"""
+    """读取经官方字段校验的“主板公司”表，返回代码、名称和行业。"""
 
     if not workbook_path.is_file():
         raise FileNotFoundError(
@@ -484,21 +528,34 @@ def load_mainboard_companies(workbook_path: Path) -> pd.DataFrame:
     except ValueError as exc:
         raise ValueError("Excel 中没有“主板公司”工作表。") from exc
 
-    required_columns = {"公司代码", "公司简称"}
+    required_columns = {"公司代码", "公司简称", "所属行业"}
     missing_columns = required_columns.difference(frame.columns)
     if missing_columns:
         missing_text = "、".join(sorted(missing_columns))
         raise ValueError(f"“主板公司”工作表缺少必要列：{missing_text}。")
 
-    companies = frame.loc[:, ["公司代码", "公司简称"]].copy()
+    companies = frame.loc[:, ["公司代码", "公司简称", "所属行业"]].copy()
     companies = companies.rename(
         columns={"公司代码": "股票代码", "公司简称": "股票名称"}
     )
     companies["股票代码"] = companies["股票代码"].map(_as_six_digit_code)
     companies["股票名称"] = companies["股票名称"].fillna("").astype(str).str.strip()
-    companies = companies.dropna(subset=["股票代码"])
-    companies = companies.loc[companies["股票名称"].ne("")]
-    companies = companies.drop_duplicates(subset=["股票代码"], keep="first").reset_index(drop=True)
+    invalid_code_count = int(companies["股票代码"].isna().sum())
+    blank_name_count = int(companies["股票名称"].eq("").sum())
+    blank_industry_count = int(companies["所属行业"].map(_industry_is_blank).sum())
+    duplicate_code_count = int(companies["股票代码"].duplicated(keep=False).sum())
+    if invalid_code_count or blank_name_count or blank_industry_count or duplicate_code_count:
+        details = []
+        if invalid_code_count:
+            details.append(f"无效股票代码 {invalid_code_count} 条")
+        if blank_name_count:
+            details.append(f"空公司简称 {blank_name_count} 条")
+        if blank_industry_count:
+            details.append(f"空所属行业 {blank_industry_count} 条")
+        if duplicate_code_count:
+            details.append(f"重复股票代码 {duplicate_code_count} 条")
+        raise ValueError("“主板公司”工作表数据不完整：" + "；".join(details) + "。")
+    companies["所属行业"] = companies["所属行业"].map(_industry_or_unknown)
     if companies.empty:
         raise ValueError("“主板公司”工作表中没有可用的股票代码。")
     # 序号来自原始主板公司清单。得分相同的股票按这个序号排序。
@@ -849,7 +906,11 @@ def load_optimized_parameter_overrides(
 
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"优化参数文件 JSON 格式错误（第 {exc.lineno} 行，第 {exc.colno} 列）：{path}"
+        ) from exc
+    except OSError as exc:
         raise ValueError(f"无法读取优化参数文件：{path}") from exc
     if not isinstance(payload, Mapping):
         raise ValueError(f"优化参数文件不是 JSON 对象：{path}")
@@ -952,7 +1013,12 @@ def _apply_screening_preset(preset_name: str) -> None:
 
 
 def _apply_optimized_parameter_overrides() -> None:
-    apply_optimized_parameter_overrides(st.session_state)
+    try:
+        apply_optimized_parameter_overrides(st.session_state)
+    except ValueError as exc:
+        st.session_state[OPTIMIZED_PARAMETER_ERROR_STATE_KEY] = str(exc)
+        return
+    st.session_state.pop(OPTIMIZED_PARAMETER_ERROR_STATE_KEY, None)
     _clear_screening_result_session_state()
 
 
@@ -1878,6 +1944,7 @@ def collect_factor_frame(
                             "序号": company["序号"],
                             "股票代码": code,
                             "股票名称": name,
+                            "所属行业": _industry_or_unknown(company.get("所属行业")),
                             "数据来源": outcome.source or "未知来源",
                             "缓存命中": outcome.from_cache,
                             **factor_values,
@@ -1988,6 +2055,20 @@ def _macd_dea_minus_dif_range_bounds(
     return lower, upper
 
 
+def _volume_ratio_threshold(value: object) -> float:
+    """Validate the legacy single-threshold volume rule used by backtests."""
+
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("量比阈值必须是数值。") from exc
+    if not math.isfinite(threshold) or threshold < VOLUME_RATIO_MIN_THRESHOLD:
+        raise ValueError(
+            f"量比阈值必须是大于或等于{VOLUME_RATIO_MIN_THRESHOLD:g}的有限数值。"
+        )
+    return threshold
+
+
 def _volume_ratio_range_bounds(values: object) -> tuple[float, float]:
     """校验放量条件使用的量比闭区间。"""
 
@@ -2006,6 +2087,12 @@ def volume_ratio_range_condition_label(values: tuple[float, float]) -> str:
 
     lower, upper = _volume_ratio_range_bounds(values)
     return f"放量（量比{lower:g}-{upper:g}）"
+
+
+def volume_breakout_condition_label(threshold: float) -> str:
+    """Return the legacy volume label used by historical backtest reports."""
+
+    return f"放量（量比>{threshold:g}）"
 
 
 def _macd_golden_cross_lookback_days(value: object) -> int:
@@ -2091,6 +2178,7 @@ def condition_matrix(
     ),
     macd_dea_minus_dif_range: tuple[float, float] = DEFAULT_MACD_DEA_MINUS_DIF_RANGE,
     volume_ratio_range: tuple[float, float] = DEFAULT_VOLUME_RATIO_RANGE,
+    volume_ratio_threshold: float | None = None,
 ) -> pd.DataFrame:
     """把已勾选的规则转换为布尔矩阵；每一列对应一个可得分条件。"""
 
@@ -2128,6 +2216,11 @@ def condition_matrix(
         macd_dea_minus_dif_range
     )
     volume_ratio_min, volume_ratio_max = _volume_ratio_range_bounds(volume_ratio_range)
+    volume_threshold = (
+        _volume_ratio_threshold(volume_ratio_threshold)
+        if volume_ratio_threshold is not None
+        else None
+    )
 
     if selected.get("above_ma5"):
         conditions["站上5日线"] = truth("站上MA5")
@@ -2194,12 +2287,20 @@ def condition_matrix(
             .fillna(False)
         )
     if selected.get("volume_breakout"):
-        conditions[
-            volume_ratio_range_condition_label((volume_ratio_min, volume_ratio_max))
-        ] = pd.to_numeric(
+        volume_ratio = pd.to_numeric(
             factors.get("量比", pd.Series(index=factors.index, dtype="float64")),
             errors="coerce",
-        ).between(volume_ratio_min, volume_ratio_max, inclusive="both").fillna(False)
+        )
+        if volume_threshold is None:
+            conditions[
+                volume_ratio_range_condition_label((volume_ratio_min, volume_ratio_max))
+            ] = volume_ratio.between(
+                volume_ratio_min, volume_ratio_max, inclusive="both"
+            ).fillna(False)
+        else:
+            conditions[volume_breakout_condition_label(volume_threshold)] = (
+                volume_ratio.gt(volume_threshold).fillna(False)
+            )
     if selected.get("amount_at_least_100m"):
         conditions["日成交额≥1亿元"] = numeric_at_least("当日成交额", 100_000_000.0)
     if selected.get("turnover_in_range"):
@@ -2348,6 +2449,7 @@ def score_and_select(
     ),
     macd_dea_minus_dif_range: tuple[float, float] = DEFAULT_MACD_DEA_MINUS_DIF_RANGE,
     volume_ratio_range: tuple[float, float] = DEFAULT_VOLUME_RATIO_RANGE,
+    volume_ratio_threshold: float | None = None,
     require_all: bool = False,
     top_n: int = 10,
 ) -> tuple[pd.DataFrame, int, int]:
@@ -2372,14 +2474,20 @@ def score_and_select(
         kdj_healthy_golden_cross_age_range=kdj_healthy_golden_cross_age_range,
         macd_dea_minus_dif_range=macd_dea_minus_dif_range,
         volume_ratio_range=volume_ratio_range,
+        volume_ratio_threshold=volume_ratio_threshold,
     )
     if matrix.empty:
         raise ValueError("请至少勾选一个筛选条件。")
 
     scored = factors.copy()
-    volume_condition_label = volume_ratio_range_condition_label(
-        _volume_ratio_range_bounds(volume_ratio_range)
-    )
+    if volume_ratio_threshold is None:
+        volume_condition_label = volume_ratio_range_condition_label(
+            _volume_ratio_range_bounds(volume_ratio_range)
+        )
+    else:
+        volume_condition_label = volume_breakout_condition_label(
+            _volume_ratio_threshold(volume_ratio_threshold)
+        )
     if selected.get("volume_breakout") and volume_condition_label in matrix:
         scored["放量"] = matrix[volume_condition_label]
     kdj_condition_label = kdj_healthy_golden_cross_condition_label(
@@ -2483,6 +2591,100 @@ def score_and_select(
         len(eligible),
         risk_excluded_count,
     )
+
+
+def _ranked_candidates_with_industry(
+    ranked_candidates: pd.DataFrame,
+    factors: pd.DataFrame,
+) -> pd.DataFrame:
+    """为已排序候选附加行业，且不改变原有排名或 Top 10 展示数据。"""
+
+    candidates = ranked_candidates.copy()
+    if "所属行业" not in candidates:
+        if {"股票代码", "所属行业"}.issubset(factors.columns):
+            industry_lookup = factors.loc[:, ["股票代码", "所属行业"]].copy()
+            industry_lookup["股票代码"] = industry_lookup["股票代码"].astype(str)
+            industry_by_code = (
+                industry_lookup.drop_duplicates(subset=["股票代码"], keep="first")
+                .set_index("股票代码")["所属行业"]
+            )
+            candidates["所属行业"] = candidates["股票代码"].astype(str).map(
+                industry_by_code
+            )
+        else:
+            candidates["所属行业"] = UNKNOWN_INDUSTRY
+    candidates["所属行业"] = candidates["所属行业"].map(_industry_or_unknown)
+    return candidates
+
+
+def prepare_prediction_review_candidates(
+    ranked_candidates: pd.DataFrame,
+    factors: pd.DataFrame,
+) -> pd.DataFrame:
+    """整理评分前 50 名，供人工按行业判断。"""
+
+    candidates = _ranked_candidates_with_industry(ranked_candidates, factors).head(
+        PREDICTION_REVIEW_TOP_N
+    )
+    if candidates.empty:
+        return candidates
+
+    candidates = candidates.reset_index(drop=True)
+    candidates.insert(
+        0,
+        PREDICTION_REVIEW_RANK_COLUMN,
+        range(1, len(candidates) + 1),
+    )
+    leading_columns = (
+        PREDICTION_REVIEW_RANK_COLUMN,
+        "股票代码",
+        "股票名称",
+        "所属行业",
+        "得分",
+    )
+    ordered_columns = [
+        column for column in leading_columns if column in candidates.columns
+    ]
+    ordered_columns.extend(
+        column for column in candidates.columns if column not in ordered_columns
+    )
+    return candidates.loc[:, ordered_columns]
+
+
+def save_prediction_review_candidates(
+    review_candidates: pd.DataFrame,
+    path: Path = PREDICTION_REVIEW_EXPORT_PATH,
+) -> None:
+    """覆盖保存评分前 50 名，供盘中监控程序读取。"""
+
+    review_candidates.to_csv(path, index=False, encoding="utf-8-sig")
+
+
+def summarize_prediction_review_industries(
+    review_candidates: pd.DataFrame,
+) -> pd.DataFrame:
+    """汇总评分前 50 名中各行业的入选数量。"""
+
+    summary_columns = ["所属行业", PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN]
+    candidates = review_candidates.head(PREDICTION_REVIEW_TOP_N)
+    if candidates.empty:
+        return pd.DataFrame(columns=summary_columns)
+
+    if "所属行业" in candidates:
+        industries = candidates["所属行业"].map(_industry_or_unknown)
+    else:
+        industries = pd.Series(UNKNOWN_INDUSTRY, index=candidates.index)
+    industry_summary = (
+        industries.value_counts()
+        .rename(PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN)
+        .rename_axis("所属行业")
+        .reset_index()
+    )
+    return industry_summary.sort_values(
+        [PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN, "所属行业"],
+        ascending=[False, True],
+        kind="stable",
+    ).reset_index(drop=True)
 
 
 def clear_disk_cache() -> None:
@@ -2615,6 +2817,11 @@ def _render_sidebar(company_count: int) -> dict[str, object]:
             width="stretch",
             on_click=_apply_optimized_parameter_overrides,
         )
+        optimized_parameter_error = st.session_state.get(
+            OPTIMIZED_PARAMETER_ERROR_STATE_KEY
+        )
+        if isinstance(optimized_parameter_error, str):
+            st.error(optimized_parameter_error)
 
         st.divider()
         st.header("趋势因子")
@@ -2966,6 +3173,7 @@ def _render_factor_status() -> None:
             "序号",
             "股票代码",
             "股票名称",
+            "所属行业",
             "数据日期",
             "收盘价",
             "MA5",
@@ -3054,14 +3262,41 @@ def _render_results(as_of_date: date | datetime | None = None) -> None:
             mime="text/csv",
         )
 
+    review_candidates = st.session_state.get("szse_quant_ranked_top_50")
+    if isinstance(review_candidates, pd.DataFrame) and not review_candidates.empty:
+        st.subheader("评分排名第一（含所属行业）")
+        st.dataframe(
+            review_candidates.head(1),
+            hide_index=True,
+            width="stretch",
+        )
+        st.subheader(f"前 {len(review_candidates)} 名（含所属行业）")
+        st.dataframe(
+            review_candidates,
+            hide_index=True,
+            width="stretch",
+            height=720,
+        )
+        st.subheader(f"当日前 {len(review_candidates)} 名行业入选数量")
+        st.dataframe(
+            summarize_prediction_review_industries(review_candidates),
+            hide_index=True,
+            width="stretch",
+        )
+
 
 def _ensure_current_data_pipeline() -> None:
     """清除与当前数据和结果结构不兼容的会话数据。"""
 
     if st.session_state.get("szse_quant_pipeline_version") == DATA_PIPELINE_VERSION:
         results = st.session_state.get("szse_quant_results")
-        if isinstance(results, pd.DataFrame) and "未满足条件（扣分项）" not in results:
-            _clear_screening_result_session_state()
+        if isinstance(results, pd.DataFrame):
+            review_candidates = st.session_state.get("szse_quant_ranked_top_50")
+            if (
+                "未满足条件（扣分项）" not in results
+                or not isinstance(review_candidates, pd.DataFrame)
+            ):
+                _clear_screening_result_session_state()
         return
     _clear_collection_session_state()
     st.session_state["szse_quant_pipeline_version"] = DATA_PIPELINE_VERSION
@@ -3130,29 +3365,43 @@ def main() -> None:
                     ),
                     "require_all": bool(settings["require_all"]),
                 }
-                results, eligible_count, risk_excluded_count = score_and_select(
+                ranked_candidates, eligible_count, risk_excluded_count = score_and_select(
                     factors,
                     settings["selected"],
                     selected_risks=settings["selected_risks"],
-                    top_n=10,
+                    top_n=PREDICTION_REVIEW_TOP_N,
                     **score_options,
                 )
+                results = ranked_candidates.head(10).reset_index(drop=True)
+                unfiltered_ranked_candidates, _, _ = score_and_select(
+                    factors,
+                    settings["selected"],
+                    selected_risks={},
+                    top_n=PREDICTION_REVIEW_TOP_N,
+                    **score_options,
+                )
+                review_candidates = prepare_prediction_review_candidates(
+                    unfiltered_ranked_candidates,
+                    factors,
+                )
+                save_prediction_review_candidates(review_candidates)
                 st.session_state["szse_quant_results"] = results
                 st.session_state["szse_quant_eligible_count"] = eligible_count
                 st.session_state["szse_quant_risk_excluded_count"] = risk_excluded_count
                 st.session_state["szse_quant_results_as_of_date"] = target_day.isoformat()
                 st.session_state["szse_quant_results_max_score"] = max_score
+                st.session_state["szse_quant_ranked_top_50"] = review_candidates
                 if eligible_count:
                     st.success(
                         f"当前满分 {max_score:g} 分；风险过滤剔除 {risk_excluded_count} 只股票；"
-                        f"共有 {eligible_count} 只股票进入当前规则排序，已展示前 10 名。"
+                        f"共有 {eligible_count} 只股票进入风险过滤后的排序，已展示前 10 名和未过滤的前 50 名。"
                     )
                 else:
                     st.warning(
                         f"当前满分 {max_score:g} 分；风险过滤剔除 {risk_excluded_count} 只股票；"
-                        "没有股票满足当前严格风险筛选条件。"
+                        "没有股票满足当前严格风险筛选条件；仍已生成未过滤的前 50 名。"
                     )
-            except ValueError as exc:
+            except (OSError, ValueError) as exc:
                 st.warning(str(exc))
 
     _render_results(target_day)

@@ -22,10 +22,10 @@ if str(PROJECT_DIR) not in sys.path:
 
 try:  # 支持直接运行和包导入两种方式。
     from strategy_backtest import backtest_core as core
-    from strategy_backtest import szse_quant_app as strategy_app
+    from strategy_backtest.runtime_strategy import strategy_app
 except ImportError:  # pragma: no cover - `streamlit run strategy_backtest/backtest_app.py`。
     import backtest_core as core
-    import szse_quant_app as strategy_app
+    from runtime_strategy import strategy_app
 
 
 DEFAULT_RETURNS_WORKBOOK = (
@@ -34,6 +34,13 @@ DEFAULT_RETURNS_WORKBOOK = (
     / "outputs"
     / "input_data"
     / "深市主板每日涨跌幅_2025-10-29_2026-07-27.xlsx"
+)
+ROLLING_RETURNS_WORKBOOK = (
+    PROJECT_DIR
+    / "strategy_backtest"
+    / "outputs"
+    / "input_data"
+    / "深市主板每日涨跌幅_滚动更新.xlsx"
 )
 DEFAULT_STOCK_POOL = PROJECT_DIR / "深交所数据.xlsx"
 
@@ -78,6 +85,14 @@ AUTO_EXCLUDED_PROBLEM_TYPES = frozenset(
         "策略预热不足",
     }
 )
+
+
+def _preferred_returns_workbook() -> Path:
+    """Use the daily runner's rolling workbook when its atomic output exists."""
+
+    if ROLLING_RETURNS_WORKBOOK.is_file():
+        return ROLLING_RETURNS_WORKBOOK
+    return DEFAULT_RETURNS_WORKBOOK
 
 
 def _backtest_key(snapshot_key: str) -> str:
@@ -683,9 +698,10 @@ def _run_backtest(
     )
     if backtest_companies.empty:
         raise core.BacktestDataError("收益文件失败明细已剔除全部股票池。")
-    # 始终用收益文件的完整可用区间取长历史，以复用已有全区间磁盘缓存。
-    full_first_signal_date = return_data.signal_dates[0]
-    full_last_market_date = return_data.next_trade_dates[return_data.signal_dates[-1]]
+    full_first_signal_date = selected_return_data.signal_dates[0]
+    full_last_market_date = selected_return_data.next_trade_dates[
+        selected_return_data.signal_dates[-1]
+    ]
     histories, history_errors, history_summary, cache_key = core.collect_full_histories(
         backtest_companies,
         first_signal_date=full_first_signal_date,
@@ -879,9 +895,10 @@ st.set_page_config(page_title="深市主板策略回测", layout="wide")
 st.title("深市主板策略回测")
 
 try:
+    returns_workbook = _preferred_returns_workbook()
     return_data = _load_return_data(
-        str(DEFAULT_RETURNS_WORKBOOK),
-        DEFAULT_RETURNS_WORKBOOK.stat().st_mtime_ns,
+        str(returns_workbook),
+        returns_workbook.stat().st_mtime_ns,
         RETURN_DATA_CACHE_VERSION,
     )
     companies = _load_companies(

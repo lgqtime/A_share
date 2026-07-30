@@ -1,7 +1,7 @@
 """深市主板固定策略的严格下一交易日回测核心。
 
-本模块不修改原始 Streamlit 应用。它复用同目录策略快照中的因子和筛选函数，
-但为历史回测单独保存每只股票的长区间完整日线，避免按每个交易日重复联网。
+本模块复用根目录生产策略中的因子和筛选函数，但为历史回测单独保存每只股票的
+长区间完整日线，避免按每个交易日重复联网。
 """
 
 from __future__ import annotations
@@ -24,17 +24,19 @@ import requests
 
 try:  # 支持 `python strategy_backtest/run_backtest.py` 和包导入两种方式。
     from . import factor_batch
-    from . import szse_quant_app as strategy_app
+    from .runtime_strategy import ROOT_STRATEGY_PATH, strategy_app
 except ImportError:  # pragma: no cover - 命令行脚本直接执行时走此分支。
     import factor_batch
-    import szse_quant_app as strategy_app
+    from runtime_strategy import ROOT_STRATEGY_PATH, strategy_app
 
 
 MODULE_DIR = Path(__file__).resolve().parent
 HISTORY_CACHE_ROOT = MODULE_DIR / "data_cache" / "long_history"
 FACTOR_CACHE_ROOT = MODULE_DIR / "data_cache" / "strategy_factors"
 
-HISTORY_CACHE_VERSION = 1
+HISTORY_CACHE_VERSION = 2
+LEGACY_HISTORY_CACHE_VERSION = 1
+MERGED_HISTORY_CACHE_DIRECTORY = "_merged_bars640_v2"
 FACTOR_CACHE_VERSION = 4
 # 全量交互回测不能复用固定策略留下的部分因子缓存。此前的试验性快速序列
 # 也不满足“每个截至日从固定预热窗口重新起算”的语义，因此单独升级版本。
@@ -73,9 +75,7 @@ HISTORY_ERROR_COLUMNS = (
     "失败原因",
 )
 HISTORY_SCHEMA_COLUMNS = tuple(strategy_app.HISTORY_COLUMNS)
-STRATEGY_SNAPSHOT_SIGNATURE = hashlib.sha256(
-    (MODULE_DIR / "szse_quant_app.py").read_bytes()
-).hexdigest()
+STRATEGY_SNAPSHOT_SIGNATURE = hashlib.sha256(ROOT_STRATEGY_PATH.read_bytes()).hexdigest()
 REQUIRED_CACHED_FACTOR_FIELDS = frozenset(
     {
         "数据日期",
@@ -128,6 +128,16 @@ class HistoryOutcome:
     from_cache: bool
     cache_token: str | None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class _CachedHistory:
+    """A validated history cache entry together with its covered window."""
+
+    path: Path
+    outcome: HistoryOutcome
+    coverage_start: date
+    coverage_end: date
 
 
 HistoryProgressCallback = Callable[[int, int, str, int, int, int], None]
@@ -289,7 +299,7 @@ def build_next_day_open_to_close_returns(
 
 
 def history_cache_key(first_signal_date: date, last_market_date: date) -> str:
-    """为指定回测窗口生成独立长历史缓存键。"""
+    """Return the factor-cache key for a requested backtest window."""
 
     return (
         f"{first_signal_date.isoformat()}_{last_market_date.isoformat()}"
@@ -298,6 +308,15 @@ def history_cache_key(first_signal_date: date, last_market_date: date) -> str:
 
 
 def _history_cache_path(cache_key: str, code: str) -> Path:
+    """Return the shared, merged long-history cache path for one stock."""
+
+    del cache_key
+    return HISTORY_CACHE_ROOT / MERGED_HISTORY_CACHE_DIRECTORY / f"{code}.json"
+
+
+def _legacy_history_cache_path(cache_key: str, code: str) -> Path:
+    """Return a pre-v2 range-specific cache path for migration reads only."""
+
     return HISTORY_CACHE_ROOT / cache_key / f"{code}.json"
 
 
@@ -327,25 +346,93 @@ def _history_cache_token(payload: Mapping[str, object], path: Path) -> str:
     return f"{saved_at}:{path.stat().st_mtime_ns}"
 
 
-def _read_history_cache(
+def _as_cache_date(value: object) -> date | None:
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return pd.Timestamp(parsed).date()
+
+
+def _history_cache_key_bounds(cache_key: str) -> tuple[date, date] | None:
+    """Parse the date bounds encoded by the former range-specific cache key."""
+
+    parts = cache_key.split("_")
+    if len(parts) != 3 or not parts[2].startswith("bars"):
+        return None
+    first_signal_date = _as_cache_date(parts[0])
+    end_date = _as_cache_date(parts[1])
+    if (
+        first_signal_date is None
+        or end_date is None
+        or first_signal_date > end_date
+    ):
+        return None
+    return first_signal_date, end_date
+
+
+def _legacy_history_cache_keys(
+    first_signal_date: date,
+    end_date: date,
+) -> tuple[str, ...]:
+    """Order legacy cache directories by their likely coverage of this request."""
+
+    try:
+        directory_names = [
+            path.name
+            for path in HISTORY_CACHE_ROOT.iterdir()
+            if path.is_dir() and path.name != MERGED_HISTORY_CACHE_DIRECTORY
+        ]
+    except OSError:
+        return ()
+
+    needed_start = first_signal_date - timedelta(days=FULL_HISTORY_LOOKBACK_DAYS)
+
+    def sort_key(cache_key: str) -> tuple[int, int, int, int, str]:
+        bounds = _history_cache_key_bounds(cache_key)
+        if bounds is None:
+            return (1, 1, 0, 0, cache_key)
+        cached_first_signal_date, cached_end_date = bounds
+        cached_start = cached_first_signal_date - timedelta(
+            days=FULL_HISTORY_LOOKBACK_DAYS
+        )
+        return (
+            0 if cached_start <= needed_start and cached_end_date >= end_date else 1,
+            0 if cached_end_date >= end_date else 1,
+            -min(cached_end_date, end_date).toordinal(),
+            cached_start.toordinal(),
+            cache_key,
+        )
+
+    return tuple(sorted(directory_names, key=sort_key))
+
+
+def _read_history_cache_entry(
     code: str,
     *,
-    cache_key: str,
-    end_date: date,
+    path: Path,
     cache_hours: float,
-) -> HistoryOutcome | None:
-    """读取本模块自己的长历史缓存，不复用原应用的短窗口缓存。"""
+    allow_stale: bool = False,
+) -> _CachedHistory | None:
+    """Read and validate one shared or legacy long-history cache file."""
 
-    target = _history_cache_path(cache_key, code)
-    if not _cache_is_fresh(target, cache_hours):
+    if allow_stale:
+        if not path.is_file():
+            return None
+    elif not _cache_is_fresh(path, cache_hours):
         return None
     try:
-        payload = json.loads(target.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, Mapping):
             return None
-        if payload.get("version") != HISTORY_CACHE_VERSION:
+        if payload.get("version") not in (
+            LEGACY_HISTORY_CACHE_VERSION,
+            HISTORY_CACHE_VERSION,
+        ):
             return None
-        if payload.get("code") != code or payload.get("end_date") != end_date.isoformat():
+        if payload.get("code") != code:
+            return None
+        coverage_end = _as_cache_date(payload.get("end_date"))
+        if coverage_end is None:
             return None
         raw_bars = payload.get("bars")
         if not isinstance(raw_bars, list):
@@ -363,19 +450,175 @@ def _read_history_cache(
             return None
         history = strategy_app._normalize_history_frame(pd.DataFrame(raw_bars))
         history = history.loc[
-            history["date"].le(pd.Timestamp(end_date))
+            history["date"].le(pd.Timestamp(coverage_end))
         ].reset_index(drop=True)
         if history.empty:
             return None
-        return HistoryOutcome(
-            code=code,
-            history=history,
-            source=str(payload.get("source") or "本地长历史缓存"),
-            from_cache=True,
-            cache_token=_history_cache_token(payload, target),
+        actual_coverage_start = pd.Timestamp(history["date"].iloc[0]).date()
+        coverage_start = _as_cache_date(payload.get("coverage_start"))
+        if coverage_start is None:
+            cached_first_signal_date = _as_cache_date(
+                payload.get("first_signal_date")
+            )
+            coverage_start = (
+                cached_first_signal_date
+                - timedelta(days=FULL_HISTORY_LOOKBACK_DAYS)
+                if cached_first_signal_date is not None
+                else actual_coverage_start
+            )
+        # A provider can return more history than the requested warmup window.
+        # Reuse those bars instead of downloading the already cached prefix again.
+        coverage_start = min(coverage_start, actual_coverage_start)
+        if coverage_start > coverage_end:
+            return None
+        return _CachedHistory(
+            path=path,
+            outcome=HistoryOutcome(
+                code=code,
+                history=history,
+                source=str(payload.get("source") or "本地长历史缓存"),
+                from_cache=True,
+                cache_token=_history_cache_token(payload, path),
+            ),
+            coverage_start=coverage_start,
+            coverage_end=coverage_end,
         )
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
+
+
+def _cached_history_covers(
+    cached: _CachedHistory,
+    *,
+    history_start: date,
+    end_date: date,
+) -> bool:
+    return cached.coverage_start <= history_start and cached.coverage_end >= end_date
+
+
+def _cached_history_score(
+    cached: _CachedHistory,
+    *,
+    history_start: date,
+    end_date: date,
+) -> tuple[int, int, int, int]:
+    overlap_start = max(cached.coverage_start, history_start)
+    overlap_end = min(cached.coverage_end, end_date)
+    overlap_days = max(0, (overlap_end - overlap_start).days + 1)
+    return (
+        int(_cached_history_covers(cached, history_start=history_start, end_date=end_date)),
+        overlap_days,
+        cached.coverage_end.toordinal(),
+        -cached.coverage_start.toordinal(),
+    )
+
+
+def _find_cached_history(
+    code: str,
+    *,
+    cache_key: str,
+    first_signal_date: date,
+    end_date: date,
+    cache_hours: float,
+    legacy_cache_keys: Sequence[str],
+    allow_stale: bool = False,
+) -> _CachedHistory | None:
+    """Use the merged cache first, then migrate the best usable legacy entry."""
+
+    history_start = first_signal_date - timedelta(days=FULL_HISTORY_LOOKBACK_DAYS)
+    cached = _read_history_cache_entry(
+        code,
+        path=_history_cache_path(cache_key, code),
+        cache_hours=cache_hours,
+        allow_stale=allow_stale,
+    )
+    if cached is not None and _cached_history_covers(
+        cached,
+        history_start=history_start,
+        end_date=end_date,
+    ):
+        return cached
+
+    best_cached = cached
+    for legacy_cache_key in legacy_cache_keys:
+        legacy_cached = _read_history_cache_entry(
+            code,
+            path=_legacy_history_cache_path(legacy_cache_key, code),
+            cache_hours=cache_hours,
+            allow_stale=allow_stale,
+        )
+        if legacy_cached is None:
+            continue
+        if _cached_history_covers(
+            legacy_cached,
+            history_start=history_start,
+            end_date=end_date,
+        ):
+            return legacy_cached
+        if best_cached is None or _cached_history_score(
+            legacy_cached,
+            history_start=history_start,
+            end_date=end_date,
+        ) > _cached_history_score(
+            best_cached,
+            history_start=history_start,
+            end_date=end_date,
+        ):
+            best_cached = legacy_cached
+    return best_cached
+
+
+def _read_history_cache(
+    code: str,
+    *,
+    cache_key: str,
+    end_date: date,
+    cache_hours: float,
+    first_signal_date: date | None = None,
+) -> HistoryOutcome | None:
+    """Read a merged cache entry when it covers the requested history window."""
+
+    cached = _read_history_cache_entry(
+        code,
+        path=_history_cache_path(cache_key, code),
+        cache_hours=cache_hours,
+    )
+    if cached is None:
+        cached = _read_history_cache_entry(
+            code,
+            path=_legacy_history_cache_path(cache_key, code),
+            cache_hours=cache_hours,
+        )
+    if cached is None or cached.coverage_end < end_date:
+        return None
+    if first_signal_date is not None and cached.coverage_start > (
+        first_signal_date - timedelta(days=FULL_HISTORY_LOOKBACK_DAYS)
+    ):
+        return None
+    history = cached.outcome.history
+    if history is None:
+        return None
+    history = history.loc[history["date"].le(pd.Timestamp(end_date))].reset_index(
+        drop=True
+    )
+    if history.empty:
+        return None
+    return HistoryOutcome(
+        code=code,
+        history=history,
+        source=cached.outcome.source,
+        from_cache=True,
+        cache_token=cached.outcome.cache_token,
+    )
+
+
+def _merge_history_frames(*frames: pd.DataFrame) -> pd.DataFrame:
+    usable_frames = [frame for frame in frames if not frame.empty]
+    if not usable_frames:
+        return pd.DataFrame(columns=HISTORY_SCHEMA_COLUMNS)
+    return strategy_app._normalize_history_frame(
+        pd.concat(usable_frames, ignore_index=True)
+    )
 
 
 def _write_history_cache(
@@ -386,28 +629,41 @@ def _write_history_cache(
     cache_key: str,
     first_signal_date: date,
     end_date: date,
+    coverage_start: date | None = None,
 ) -> str:
-    """原子写入长历史缓存并返回用于因子缓存校验的令牌。"""
+    """Atomically persist the merged history cache and return its token."""
 
     target = _history_cache_path(cache_key, code)
     target.parent.mkdir(parents=True, exist_ok=True)
     saved_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    coverage_start = coverage_start or (
+        first_signal_date - timedelta(days=FULL_HISTORY_LOOKBACK_DAYS)
+    )
     payload: dict[str, object] = {
         "version": HISTORY_CACHE_VERSION,
         "code": code,
         "first_signal_date": first_signal_date.isoformat(),
+        "coverage_start": coverage_start.isoformat(),
         "end_date": end_date.isoformat(),
         "saved_at": saved_at,
         "source": source,
         "history_columns": list(HISTORY_SCHEMA_COLUMNS),
         "bars": strategy_app._history_to_records(history),
     }
-    temporary = target.with_suffix(".json.tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
+    temporary = target.with_name(
+        f"{target.name}.{os.getpid()}.{time.time_ns()}.tmp"
     )
-    temporary.replace(target)
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        temporary.replace(target)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
     return _history_cache_token(payload, target)
 
 
@@ -590,6 +846,70 @@ def _fetch_eastmoney_full_history(
     raise HistoryFetchError("东方财富日 K 失败：" + "；".join(problems))
 
 
+def _fetch_history_range(
+    code: str,
+    *,
+    history_start: date,
+    end_date: date,
+    limiter: strategy_app.RequestRateLimiter,
+    timeout_seconds: float,
+) -> tuple[pd.DataFrame, str]:
+    """Fetch one missing history interval, preferring Eastmoney as before."""
+
+    try:
+        return (
+            _fetch_eastmoney_full_history(
+                code,
+                history_start=history_start,
+                end_date=end_date,
+                limiter=limiter,
+                timeout_seconds=timeout_seconds,
+            ),
+            "东方财富公开日 K（前复权）",
+        )
+    except HistoryFetchError as eastmoney_error:
+        try:
+            return (
+                _fetch_tencent_full_history(
+                    code,
+                    history_start=history_start,
+                    end_date=end_date,
+                    limiter=limiter,
+                    timeout_seconds=timeout_seconds,
+                ),
+                "腾讯增强前复权日 K 回退",
+            )
+        except HistoryFetchError as tencent_error:
+            raise HistoryFetchError(
+                f"东方财富失败：{eastmoney_error}；腾讯回退失败：{tencent_error}"
+            ) from tencent_error
+
+
+def _history_outcome_from_cached(
+    cached: _CachedHistory,
+    *,
+    end_date: date,
+    cache_token: str | None = None,
+) -> HistoryOutcome | None:
+    """Limit a cached history to the requested as-of date for factor calculation."""
+
+    history = cached.outcome.history
+    if history is None:
+        return None
+    history = history.loc[history["date"].le(pd.Timestamp(end_date))].reset_index(
+        drop=True
+    )
+    if history.empty:
+        return None
+    return HistoryOutcome(
+        code=cached.outcome.code,
+        history=history,
+        source=cached.outcome.source,
+        from_cache=True,
+        cache_token=cache_token or cached.outcome.cache_token,
+    )
+
+
 def _load_one_history(
     code: str,
     *,
@@ -600,59 +920,153 @@ def _load_one_history(
     force_refresh: bool,
     limiter: strategy_app.RequestRateLimiter,
     timeout_seconds: float,
+    legacy_cache_keys: Sequence[str] | None = None,
 ) -> HistoryOutcome:
-    """优先读取本地完整历史，否则只为该股票请求一次完整区间。"""
-
-    if not force_refresh:
-        cached = _read_history_cache(
-            code,
-            cache_key=cache_key,
-            end_date=end_date,
-            cache_hours=cache_hours,
-        )
-        if cached is not None:
-            return cached
+    """Load merged history and request only the selected window's missing ranges."""
 
     history_start = first_signal_date - timedelta(days=FULL_HISTORY_LOOKBACK_DAYS)
-    try:
-        history = _fetch_eastmoney_full_history(
+    canonical_path = _history_cache_path(cache_key, code)
+    cached: _CachedHistory | None = None
+    if cache_hours > 0:
+        cached = _find_cached_history(
             code,
+            cache_key=cache_key,
+            first_signal_date=first_signal_date,
+            end_date=end_date,
+            cache_hours=cache_hours,
+            legacy_cache_keys=(
+                ()
+                if force_refresh
+                else (
+                    tuple(legacy_cache_keys)
+                    if legacy_cache_keys is not None
+                    else _legacy_history_cache_keys(first_signal_date, end_date)
+                )
+            ),
+            allow_stale=force_refresh,
+        )
+
+    if (
+        not force_refresh
+        and cached is not None
+        and _cached_history_covers(
+            cached,
             history_start=history_start,
             end_date=end_date,
-            limiter=limiter,
-            timeout_seconds=timeout_seconds,
         )
-        source = "东方财富公开日 K（前复权）"
-    except HistoryFetchError as eastmoney_error:
-        try:
-            history = _fetch_tencent_full_history(
+    ):
+        if cached.path == canonical_path:
+            outcome = _history_outcome_from_cached(cached, end_date=end_date)
+            if outcome is not None:
+                return outcome
+        else:
+            cache_token = _write_history_cache(
                 code,
-                history_start=history_start,
+                cached.outcome.history,
+                cached.outcome.source or "本地长历史缓存",
+                cache_key=cache_key,
+                first_signal_date=first_signal_date,
+                end_date=cached.coverage_end,
+                coverage_start=cached.coverage_start,
+            )
+            outcome = _history_outcome_from_cached(
+                cached,
                 end_date=end_date,
+                cache_token=cache_token,
+            )
+            if outcome is not None:
+                return outcome
+
+    missing_ranges: list[tuple[date, date]]
+    if force_refresh or cached is None:
+        missing_ranges = [(history_start, end_date)]
+    else:
+        missing_ranges = []
+        if history_start < cached.coverage_start:
+            missing_ranges.append(
+                (history_start, cached.coverage_start - timedelta(days=1))
+            )
+        if cached.coverage_end < end_date:
+            missing_ranges.append(
+                (cached.coverage_end + timedelta(days=1), end_date)
+            )
+
+    fetched_histories: list[pd.DataFrame] = []
+    fetched_sources: list[str] = []
+    try:
+        for missing_start, missing_end in missing_ranges:
+            if missing_start > missing_end:
+                continue
+            history, source = _fetch_history_range(
+                code,
+                history_start=missing_start,
+                end_date=missing_end,
                 limiter=limiter,
                 timeout_seconds=timeout_seconds,
             )
-            source = "腾讯增强前复权日 K 回退"
-        except HistoryFetchError as tencent_error:
+            fetched_histories.append(history)
+            fetched_sources.append(source)
+    except HistoryFetchError as error:
+        return HistoryOutcome(
+            code=code,
+            history=None,
+            source=None,
+            from_cache=False,
+            cache_token=None,
+            error=str(error),
+        )
+
+    if cached is None:
+        merged_history = _merge_history_frames(*fetched_histories)
+        coverage_start = history_start
+        coverage_end = end_date
+        source = fetched_sources[-1]
+    else:
+        try:
+            merged_history = _merge_history_frames(
+                cached.outcome.history, *fetched_histories
+            )
+        except (TypeError, ValueError) as error:
             return HistoryOutcome(
                 code=code,
                 history=None,
                 source=None,
                 from_cache=False,
                 cache_token=None,
-                error=f"东方财富失败：{eastmoney_error}；腾讯回退失败：{tencent_error}",
+                error=f"合并本地长历史缓存失败：{error}",
             )
+        coverage_start = min(cached.coverage_start, history_start)
+        coverage_end = max(cached.coverage_end, end_date)
+        source = "; ".join(
+            source_part
+            for source_part in (cached.outcome.source, *fetched_sources)
+            if source_part
+        )
+
+    if merged_history.empty:
+        return HistoryOutcome(
+            code=code,
+            history=None,
+            source=None,
+            from_cache=False,
+            cache_token=None,
+            error="未获取到可用的长历史日线。",
+        )
 
     cache_token = None
     if cache_hours > 0:
         cache_token = _write_history_cache(
             code,
-            history,
+            merged_history,
             source,
             cache_key=cache_key,
             first_signal_date=first_signal_date,
-            end_date=end_date,
+            end_date=coverage_end,
+            coverage_start=coverage_start,
         )
+    history = merged_history.loc[
+        merged_history["date"].le(pd.Timestamp(end_date))
+    ].reset_index(drop=True)
     return HistoryOutcome(
         code=code,
         history=history,
@@ -674,7 +1088,7 @@ def collect_full_histories(
     timeout_seconds: float,
     progress_callback: HistoryProgressCallback | None = None,
 ) -> tuple[dict[str, HistoryOutcome], pd.DataFrame, dict[str, int], str]:
-    """并发加载所有股票的长历史，每只股票至多联网一次。"""
+    """并发加载所有股票的长历史，并只补齐缓存覆盖范围外的日期。"""
 
     if not 1 <= int(workers) <= MAX_WORKERS:
         raise ValueError(f"并发数必须在 1 至 {MAX_WORKERS} 之间。")
@@ -688,6 +1102,11 @@ def collect_full_histories(
         raise BacktestDataError("没有可处理的股票。")
 
     cache_key = history_cache_key(first_signal_date, end_date)
+    legacy_cache_keys = (
+        ()
+        if force_refresh or cache_hours <= 0
+        else _legacy_history_cache_keys(first_signal_date, end_date)
+    )
     records = companies.to_dict("records")
     limiter = strategy_app.RequestRateLimiter(float(request_interval_seconds))
     outcomes: dict[str, HistoryOutcome] = {}
@@ -706,6 +1125,7 @@ def collect_full_histories(
                 force_refresh=force_refresh,
                 limiter=limiter,
                 timeout_seconds=float(timeout_seconds),
+                legacy_cache_keys=legacy_cache_keys,
             ): record
             for record in records
         }
@@ -1033,6 +1453,7 @@ def collect_factor_rows_by_day(
                     "序号": record["序号"],
                     "股票代码": code,
                     "股票名称": record["股票名称"],
+                    "所属行业": record.get("所属行业"),
                     "数据来源": outcome.source or "未知来源",
                     "缓存命中": outcome.from_cache,
                     **factor_values,
@@ -1711,6 +2132,7 @@ def collect_all_factor_rows_by_day(
                     "序号": record["序号"],
                     "股票代码": code,
                     "股票名称": record["股票名称"],
+                    "所属行业": record.get("所属行业"),
                     "数据来源": outcome.source or "未知来源",
                     "缓存命中": outcome.from_cache,
                     **factor_values,
@@ -1759,6 +2181,30 @@ def _selection_reason(
     return "无可用候选"
 
 
+def _attach_industries_to_ranked_candidates(
+    ranked_candidates: pd.DataFrame,
+    factors: pd.DataFrame,
+) -> pd.DataFrame:
+    """把股票池行业附回评分函数返回的有序候选，且不改变既有排序。"""
+
+    if (
+        ranked_candidates.empty
+        or "股票代码" not in ranked_candidates.columns
+        or "股票代码" not in factors.columns
+        or "所属行业" not in factors.columns
+    ):
+        return ranked_candidates
+    industries = factors.loc[:, ["股票代码", "所属行业"]].copy()
+    industries["股票代码"] = industries["股票代码"].astype(str)
+    industry_by_code = (
+        industries.drop_duplicates(subset=["股票代码"], keep="first")
+        .set_index("股票代码")["所属行业"]
+    )
+    result = ranked_candidates.copy()
+    result["所属行业"] = result["股票代码"].astype(str).map(industry_by_code)
+    return result
+
+
 def evaluate_strategy(
     return_data: ReturnData,
     factors_by_day: Mapping[date, Sequence[Mapping[str, object]]],
@@ -1786,7 +2232,7 @@ def evaluate_strategy(
     top_n: int = 1,
     realized_returns: Mapping[tuple[date, str], float] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    """按筛选结果第一名预测，并计算严格次日收益。"""
+    """按风险过滤后的评分第一名选出一股，并计算严格次日收益。"""
 
     strategy_app.validate_selected_conditions(
         selected,
@@ -1805,6 +2251,7 @@ def evaluate_strategy(
     kdj_age_range = strategy_app._kdj_healthy_golden_cross_age_range(
         kdj_healthy_golden_cross_age_range
     )
+    candidate_limit = max(1, int(top_n))
     max_score = float(strategy_app.maximum_score(selected))
     return_lookup = return_data.strict_returns if realized_returns is None else realized_returns
     cumulative_multiplier = 1.0
@@ -1866,8 +2313,9 @@ def evaluate_strategy(
                 volume_ratio_range=volume_range,
                 volume_ratio_threshold=volume_threshold,
                 require_all=require_all,
-                top_n=top_n,
+                top_n=candidate_limit,
             )
+            selection = _attach_industries_to_ranked_candidates(selection, factors)
 
         row: dict[str, object] = {
             "选股日期": signal_day,
@@ -1879,6 +2327,7 @@ def evaluate_strategy(
             "策略满分": max_score,
             "选中股票代码": None,
             "选中股票名称": None,
+            "选中所属行业": None,
             "选中得分": None,
             "选中数据日期": None,
             "选中数据来源": None,
@@ -1916,6 +2365,7 @@ def evaluate_strategy(
                 {
                     "选中股票代码": code,
                     "选中股票名称": chosen.get("股票名称"),
+                    "选中所属行业": chosen.get("所属行业"),
                     "选中得分": chosen.get("得分"),
                     "选中数据日期": chosen.get("数据日期"),
                     "选中数据来源": chosen.get("数据来源"),
@@ -1969,7 +2419,10 @@ def evaluate_strategy(
         "无信号天数": no_signal_count,
         "次日收益缺失天数": missing_return_count,
         "策略满分": max_score,
-        "持仓规则": "每个选股日仅买入筛选结果第一名；同分依次按量比、收盘日内位置和成交额降序。",
+        "持仓规则": (
+            "每个选股日仅买入一只股票：取风险过滤后的评分排名第一名；"
+            "得分相同依次按量比、收盘日内位置、成交额降序，再按股票代码升序。"
+        ),
         "收益规则": "严格下一市场交易日收盘相对选股日收盘的前复权涨跌幅；未预测日按 0% 计入复利。",
         "预测正确规则": "仅选中股票且存在严格下一交易日收益时形成预测；涨幅大于 0% 记为正确，其余预测记为失败。",
     }

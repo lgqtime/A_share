@@ -131,8 +131,22 @@ class ScreeningPresetTests(unittest.TestCase):
         settings = app.default_screening_settings()
         settings["szse_quant_filter_rsi_in_range"] = False
         settings["szse_quant_risk_bias_high"] = False
-
-        app.apply_optimized_parameter_overrides(settings)
+        with TemporaryDirectory() as temporary_directory:
+            report_path = Path(temporary_directory) / "optimized_parameters.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "best_settings": {
+                            "szse_quant_filter_rsi_range": [48.4, 54.6],
+                            "szse_quant_filter_turnover_range": [5.2, 11.8],
+                            "szse_quant_filter_pct_change_range": [-1.0, 8.3],
+                            "szse_quant_filter_kdj_healthy_golden_cross_age_range": [1, 3],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            app.apply_optimized_parameter_overrides(settings, report_path)
 
         self.assertEqual(
             settings["szse_quant_filter_rsi_range"], (48.4, 54.6)
@@ -164,6 +178,14 @@ class ScreeningPresetTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ValueError, "超出允许范围"):
+                app.load_optimized_parameter_overrides(report_path)
+
+    def test_optimized_parameter_file_reports_json_position(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report_path = Path(temporary_directory) / "invalid.json"
+            report_path.write_text('{"best_settings": {"bad": [1 2]}}', encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "JSON 格式错误（第 1 行，第"):
                 app.load_optimized_parameter_overrides(report_path)
 
 

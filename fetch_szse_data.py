@@ -118,6 +118,7 @@ CROSS_BORDER_KEYWORDS = (
 
 _TAG_PATTERN = re.compile(r"<[^>]*>")
 _SIX_DIGIT_CODE_PATTERN = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+_EXACT_SIX_DIGIT_CODE_PATTERN = re.compile(r"^\d{6}$")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
 
 
@@ -129,6 +130,7 @@ def build_session() -> requests.Session:
     """创建带有深交所公开 JSON 接口所需请求头的会话。"""
 
     session = requests.Session()
+    session.trust_env = False
     session.headers.update(
         {
             "User-Agent": USER_AGENT,
@@ -282,20 +284,33 @@ def build_etf_dataframe(rows: Sequence[Mapping[str, Any]]) -> tuple[pd.DataFrame
 
 
 def build_mainboard_company_dataframe(rows: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
-    """从 A 股报表构造主板公司表，并防御性过滤非主板记录。"""
+    """从 A 股报表构造带所属行业的主板公司表，并过滤非主板记录。"""
 
     companies: list[dict[str, str]] = []
+    seen_codes: set[str] = set()
     for row in rows:
         if _clean_json_display_text(row.get("bk")) != "主板":
             continue
-        code = _extract_six_digit_code(row.get("agdm"))
+        code = _require_exact_six_digit_code(
+            row.get("agdm"),
+            "main-board company code",
+        )
         name = _clean_json_display_text(row.get("agjc"))
-        _require_value(code, "main-board company code")
+        industry = _clean_json_display_text(row.get("sshymc"))
         _require_value(name, f"main-board company name for {code}")
-        companies.append({"公司代码": code, "公司简称": name})
+        _require_value(industry, f"main-board company industry (sshymc) for {code}")
+        if code in seen_codes:
+            raise SzseApiError(f"深交所响应中的主板公司代码重复：{code}。")
+        seen_codes.add(code)
+        companies.append(
+            {
+                "公司代码": code,
+                "公司简称": name,
+                "所属行业": industry,
+            }
+        )
 
-    frame = pd.DataFrame(companies, columns=["公司代码", "公司简称"])
-    frame = frame.drop_duplicates(subset=["公司代码"], keep="first")
+    frame = pd.DataFrame(companies, columns=["公司代码", "公司简称", "所属行业"])
     return frame.sort_values("公司代码", kind="stable").reset_index(drop=True)
 
 
@@ -404,6 +419,13 @@ def _clean_json_display_text(value: Any) -> str:
 def _extract_six_digit_code(value: Any) -> str:
     match = _SIX_DIGIT_CODE_PATTERN.search(_clean_json_display_text(value))
     return match.group(1) if match else ""
+
+
+def _require_exact_six_digit_code(value: Any, field_name: str) -> str:
+    code = _clean_json_display_text(value)
+    if not _EXACT_SIX_DIGIT_CODE_PATTERN.fullmatch(code):
+        raise SzseApiError(f"深交所响应中的 {field_name} 必须为 6 位数字：{code!r}。")
+    return code
 
 
 def _require_value(value: str, field_name: str) -> None:

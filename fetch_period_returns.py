@@ -227,6 +227,7 @@ def _request_session() -> requests.Session:
     session = getattr(_THREAD_LOCAL, "session", None)
     if session is None:
         session = requests.Session()
+        session.trust_env = False
         session.headers.update(
             {
                 "User-Agent": USER_AGENT,

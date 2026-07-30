@@ -13,9 +13,47 @@ from strategy_backtest import backtest_core as core
 
 
 APP_PATH = Path(__file__).resolve().parents[1] / "strategy_backtest" / "backtest_app.py"
+ROLLING_RETURNS_WORKBOOK = (
+    APP_PATH.parent
+    / "outputs"
+    / "input_data"
+    / "深市主板每日涨跌幅_滚动更新.xlsx"
+)
 
 
 class BacktestAppResultTests(unittest.TestCase):
+    def test_app_prefers_the_daily_rolling_returns_workbook(self) -> None:
+        if not ROLLING_RETURNS_WORKBOOK.is_file():
+            self.skipTest("rolling returns workbook is not present")
+
+        return_data = core.ReturnData(
+            signal_dates=(date(2026, 5, 6),),
+            next_trade_dates={date(2026, 5, 6): date(2026, 5, 7)},
+            strict_returns={},
+        )
+        companies = pd.DataFrame(
+            [{"序号": 1, "股票代码": "000001", "股票名称": "测试"}]
+        )
+        st.cache_data.clear()
+        with (
+            patch.object(
+                core,
+                "load_strict_next_day_returns",
+                return_value=return_data,
+            ) as load_returns,
+            patch.object(
+                core.strategy_app,
+                "load_mainboard_companies",
+                return_value=companies,
+            ),
+        ):
+            app = AppTest.from_file(APP_PATH)
+            app.run(timeout=60)
+
+        self.assertEqual(load_returns.call_args.args[0], ROLLING_RETURNS_WORKBOOK)
+        self.assertEqual(len(app.exception), 0)
+        st.cache_data.clear()
+
     def test_legacy_default_ranges_are_migrated_without_overwriting_custom_ranges(
         self,
     ) -> None:
@@ -144,6 +182,17 @@ class BacktestAppResultTests(unittest.TestCase):
         )
 
     def test_history_failures_do_not_abort_the_backtest(self) -> None:
+        first_signal_day = date(2026, 5, 6)
+        last_signal_day = date(2026, 5, 7)
+        last_validation_day = date(2026, 5, 8)
+        return_data = core.ReturnData(
+            signal_dates=(first_signal_day, last_signal_day),
+            next_trade_dates={
+                first_signal_day: last_signal_day,
+                last_signal_day: last_validation_day,
+            },
+            strict_returns={},
+        )
         daily_results = pd.DataFrame(
             {
                 "选股日期": [date(2026, 5, 6)],
@@ -177,6 +226,11 @@ class BacktestAppResultTests(unittest.TestCase):
             ),
             patch.object(
                 core,
+                "load_strict_next_day_returns",
+                return_value=return_data,
+            ),
+            patch.object(
+                core,
                 "collect_all_factor_rows_by_day",
                 return_value=({}, {}, pd.DataFrame(columns=core.HISTORY_ERROR_COLUMNS)),
             ) as collect_all_factor_rows_by_day,
@@ -186,6 +240,7 @@ class BacktestAppResultTests(unittest.TestCase):
                 return_value=(daily_results, {"总收益率（%）": 1.0}),
             ) as evaluate_strategy,
         ):
+            st.cache_data.clear()
             app = AppTest.from_file(APP_PATH)
             app.run(timeout=60)
             macd_factor_checkbox = app.checkbox(
@@ -223,7 +278,7 @@ class BacktestAppResultTests(unittest.TestCase):
             )
             self.assertEqual(
                 app.date_input(key="backtest_date_range").value,
-                (date(2025, 10, 29), date(2026, 7, 27)),
+                (first_signal_day, last_validation_day),
             )
             macd_factor_checkbox.set_value(True)
             macd_factor_range.set_value((0.1, 0.25))
@@ -281,8 +336,8 @@ class BacktestAppResultTests(unittest.TestCase):
         self.assertNotIn("volume_ratio_threshold", evaluate_strategy.call_args.kwargs)
         self.assertNotIn("realized_returns", evaluate_strategy.call_args.kwargs)
         factor_signal_dates = collect_all_factor_rows_by_day.call_args.args[2]
-        self.assertEqual(factor_signal_dates[0], date(2025, 10, 29))
-        self.assertEqual(factor_signal_dates[-1], date(2026, 7, 24))
+        self.assertEqual(factor_signal_dates[0], first_signal_day)
+        self.assertEqual(factor_signal_dates[-1], last_signal_day)
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(len(app.error), 0)
         self.assertTrue(
@@ -367,6 +422,12 @@ class BacktestAppResultTests(unittest.TestCase):
         self.assertEqual(factor_codes, ["000002"])
         self.assertEqual(selected_return_data.signal_dates, (second_day,))
         self.assertEqual(selected_return_data.failed_return_codes, frozenset({"000001"}))
+        self.assertEqual(
+            collect_full_histories.call_args.kwargs["first_signal_date"], second_day
+        )
+        self.assertEqual(
+            collect_full_histories.call_args.kwargs["end_date"], third_day
+        )
         self.assertEqual(
             app.date_input(key="backtest_date_range").value,
             (date(2026, 5, 7), date(2026, 5, 8)),

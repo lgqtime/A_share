@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,6 +20,7 @@ def complete_factor_row(code: str, sequence: int, signal_day: date, **overrides:
         "序号": sequence,
         "股票代码": code,
         "股票名称": f"测试{code}",
+        "所属行业": "测试行业",
         "数据来源": "测试来源",
         "数据日期": signal_day.isoformat(),
         "站上MA5": True,
@@ -656,6 +657,341 @@ class HistoryCacheTests(TestCase):
                 )
 
 
+class MergedHistoryCacheTests(TestCase):
+    @staticmethod
+    def _history(days: list[str], *, close_start: float = 10.0) -> pd.DataFrame:
+        closes = [close_start + index for index in range(len(days))]
+        return core.strategy_app._normalize_history_frame(
+            pd.DataFrame(
+                {
+                    "date": pd.to_datetime(days),
+                    "open": closes,
+                    "close": [value + 0.1 for value in closes],
+                    "high": [value + 0.2 for value in closes],
+                    "low": [value - 0.1 for value in closes],
+                    "volume": [1_000_000.0] * len(days),
+                    "amount": [100_000_000.0] * len(days),
+                    "amplitude": [1.0] * len(days),
+                    "pct_change": [1.0] * len(days),
+                    "turnover": [5.0] * len(days),
+                }
+            )
+        )
+
+    @staticmethod
+    def _write_legacy_cache(
+        root: Path,
+        *,
+        cache_key: str,
+        code: str,
+        first_signal_date: date,
+        end_date: date,
+        history: pd.DataFrame,
+    ) -> None:
+        path = root / cache_key / f"{code}.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "version": core.LEGACY_HISTORY_CACHE_VERSION,
+                    "code": code,
+                    "first_signal_date": first_signal_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "saved_at": "2026-05-08T00:00:00+00:00",
+                    "source": "旧缓存",
+                    "history_columns": list(core.HISTORY_SCHEMA_COLUMNS),
+                    "bars": core.strategy_app._history_to_records(history),
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    def test_only_missing_tail_is_downloaded_then_merged_into_shared_cache(self) -> None:
+        code = "000001"
+        first_signal_date = date(2026, 5, 6)
+        cached_end_date = date(2026, 5, 7)
+        requested_end_date = date(2026, 5, 8)
+        legacy_key = core.history_cache_key(first_signal_date, cached_end_date)
+        cached_history = self._history(["2026-05-06", "2026-05-07"])
+        missing_tail = self._history(["2026-05-08"], close_start=30.0)
+
+        with TemporaryDirectory() as temporary_directory:
+            cache_root = Path(temporary_directory)
+            self._write_legacy_cache(
+                cache_root,
+                cache_key=legacy_key,
+                code=code,
+                first_signal_date=first_signal_date,
+                end_date=cached_end_date,
+                history=cached_history,
+            )
+            with (
+                patch.object(core, "HISTORY_CACHE_ROOT", cache_root),
+                patch.object(
+                    core,
+                    "_fetch_eastmoney_full_history",
+                    return_value=missing_tail,
+                ) as fetch_history,
+            ):
+                limiter = core.strategy_app.RequestRateLimiter(0.0)
+                outcome = core._load_one_history(
+                    code,
+                    cache_key=core.history_cache_key(
+                        first_signal_date, requested_end_date
+                    ),
+                    first_signal_date=first_signal_date,
+                    end_date=requested_end_date,
+                    cache_hours=1.0,
+                    force_refresh=False,
+                    limiter=limiter,
+                    timeout_seconds=1.0,
+                    legacy_cache_keys=(legacy_key,),
+                )
+
+                fetch_history.assert_called_once_with(
+                    code,
+                    history_start=date(2026, 5, 8),
+                    end_date=requested_end_date,
+                    limiter=limiter,
+                    timeout_seconds=1.0,
+                )
+                self.assertFalse(outcome.from_cache)
+                self.assertEqual(
+                    outcome.history["date"].dt.date.tolist(),
+                    [date(2026, 5, 6), date(2026, 5, 7), date(2026, 5, 8)],
+                )
+
+                merged_path = core._history_cache_path("ignored", code)
+                merged_payload = json.loads(merged_path.read_text(encoding="utf-8"))
+                self.assertEqual(merged_payload["version"], core.HISTORY_CACHE_VERSION)
+                self.assertEqual(merged_payload["end_date"], requested_end_date.isoformat())
+                self.assertEqual(len(merged_payload["bars"]), 3)
+
+                with patch.object(core, "_fetch_eastmoney_full_history") as fetch_again:
+                    cached_outcome = core._load_one_history(
+                        code,
+                        cache_key=core.history_cache_key(
+                            first_signal_date, requested_end_date
+                        ),
+                        first_signal_date=first_signal_date,
+                        end_date=requested_end_date,
+                        cache_hours=1.0,
+                        force_refresh=False,
+                        limiter=core.strategy_app.RequestRateLimiter(0.0),
+                        timeout_seconds=1.0,
+                        legacy_cache_keys=(legacy_key,),
+                    )
+                fetch_again.assert_not_called()
+                self.assertTrue(cached_outcome.from_cache)
+
+    def test_only_missing_prefix_is_downloaded_when_selected_start_moves_earlier(self) -> None:
+        code = "000001"
+        requested_first_signal_date = date(2026, 5, 6)
+        cached_first_signal_date = date(2026, 5, 7)
+        end_date = date(2026, 5, 8)
+        legacy_key = core.history_cache_key(cached_first_signal_date, end_date)
+        cached_history = self._history(["2026-05-07", "2026-05-08"])
+        missing_prefix = self._history(["2026-05-06"], close_start=30.0)
+        requested_history_start = requested_first_signal_date - timedelta(
+            days=core.FULL_HISTORY_LOOKBACK_DAYS
+        )
+        cached_history_start = cached_first_signal_date - timedelta(
+            days=core.FULL_HISTORY_LOOKBACK_DAYS
+        )
+
+        with TemporaryDirectory() as temporary_directory:
+            cache_root = Path(temporary_directory)
+            self._write_legacy_cache(
+                cache_root,
+                cache_key=legacy_key,
+                code=code,
+                first_signal_date=cached_first_signal_date,
+                end_date=end_date,
+                history=cached_history,
+            )
+            with (
+                patch.object(core, "HISTORY_CACHE_ROOT", cache_root),
+                patch.object(
+                    core,
+                    "_fetch_eastmoney_full_history",
+                    return_value=missing_prefix,
+                ) as fetch_history,
+            ):
+                limiter = core.strategy_app.RequestRateLimiter(0.0)
+                outcome = core._load_one_history(
+                    code,
+                    cache_key=core.history_cache_key(
+                        requested_first_signal_date, end_date
+                    ),
+                    first_signal_date=requested_first_signal_date,
+                    end_date=end_date,
+                    cache_hours=1.0,
+                    force_refresh=False,
+                    limiter=limiter,
+                    timeout_seconds=1.0,
+                    legacy_cache_keys=(legacy_key,),
+                )
+
+        fetch_history.assert_called_once_with(
+            code,
+            history_start=requested_history_start,
+            end_date=cached_history_start - timedelta(days=1),
+            limiter=limiter,
+            timeout_seconds=1.0,
+        )
+        self.assertEqual(
+            outcome.history["date"].dt.date.tolist(),
+            [date(2026, 5, 6), date(2026, 5, 7), date(2026, 5, 8)],
+        )
+
+    def test_legacy_bars_before_metadata_avoid_repeating_a_prefix_download(self) -> None:
+        code = "000001"
+        requested_first_signal_date = date(2026, 5, 6)
+        cached_first_signal_date = date(2026, 5, 7)
+        end_date = date(2026, 5, 8)
+        requested_history_start = requested_first_signal_date - timedelta(
+            days=core.FULL_HISTORY_LOOKBACK_DAYS
+        )
+        legacy_key = core.history_cache_key(cached_first_signal_date, end_date)
+        history = self._history(
+            [
+                requested_history_start.isoformat(),
+                "2026-05-07",
+                "2026-05-08",
+            ]
+        )
+
+        with TemporaryDirectory() as temporary_directory:
+            cache_root = Path(temporary_directory)
+            self._write_legacy_cache(
+                cache_root,
+                cache_key=legacy_key,
+                code=code,
+                first_signal_date=cached_first_signal_date,
+                end_date=end_date,
+                history=history,
+            )
+            with (
+                patch.object(core, "HISTORY_CACHE_ROOT", cache_root),
+                patch.object(core, "_fetch_eastmoney_full_history") as fetch_history,
+            ):
+                outcome = core._load_one_history(
+                    code,
+                    cache_key=core.history_cache_key(
+                        requested_first_signal_date, end_date
+                    ),
+                    first_signal_date=requested_first_signal_date,
+                    end_date=end_date,
+                    cache_hours=1.0,
+                    force_refresh=False,
+                    limiter=core.strategy_app.RequestRateLimiter(0.0),
+                    timeout_seconds=1.0,
+                    legacy_cache_keys=(legacy_key,),
+                )
+
+        fetch_history.assert_not_called()
+        self.assertTrue(outcome.from_cache)
+
+    def test_legacy_full_coverage_is_migrated_without_a_download(self) -> None:
+        code = "000001"
+        first_signal_date = date(2026, 5, 6)
+        end_date = date(2026, 5, 8)
+        legacy_key = core.history_cache_key(first_signal_date, end_date)
+        history = self._history(["2026-05-06", "2026-05-07", "2026-05-08"])
+
+        with TemporaryDirectory() as temporary_directory:
+            cache_root = Path(temporary_directory)
+            self._write_legacy_cache(
+                cache_root,
+                cache_key=legacy_key,
+                code=code,
+                first_signal_date=first_signal_date,
+                end_date=end_date,
+                history=history,
+            )
+            with (
+                patch.object(core, "HISTORY_CACHE_ROOT", cache_root),
+                patch.object(core, "_fetch_eastmoney_full_history") as fetch_history,
+            ):
+                outcome = core._load_one_history(
+                    code,
+                    cache_key=legacy_key,
+                    first_signal_date=first_signal_date,
+                    end_date=end_date,
+                    cache_hours=1.0,
+                    force_refresh=False,
+                    limiter=core.strategy_app.RequestRateLimiter(0.0),
+                    timeout_seconds=1.0,
+                    legacy_cache_keys=(legacy_key,),
+                )
+                self.assertTrue(core._history_cache_path(legacy_key, code).is_file())
+
+        fetch_history.assert_not_called()
+        self.assertTrue(outcome.from_cache)
+
+    def test_force_refresh_and_disabled_cache_do_not_reuse_cached_coverage(self) -> None:
+        code = "000001"
+        first_signal_date = date(2026, 5, 6)
+        end_date = date(2026, 5, 8)
+        fresh_history = self._history(["2026-05-06", "2026-05-07", "2026-05-08"])
+
+        with TemporaryDirectory() as temporary_directory:
+            cache_root = Path(temporary_directory)
+            with patch.object(core, "HISTORY_CACHE_ROOT", cache_root):
+                core._write_history_cache(
+                    code,
+                    fresh_history,
+                    "测试",
+                    cache_key="test",
+                    first_signal_date=first_signal_date,
+                    end_date=end_date,
+                )
+                with patch.object(
+                    core,
+                    "_fetch_eastmoney_full_history",
+                    return_value=fresh_history,
+                ) as force_fetch:
+                    core._load_one_history(
+                        code,
+                        cache_key="test",
+                        first_signal_date=first_signal_date,
+                        end_date=end_date,
+                        cache_hours=1.0,
+                        force_refresh=True,
+                        limiter=core.strategy_app.RequestRateLimiter(0.0),
+                        timeout_seconds=1.0,
+                    )
+                self.assertEqual(
+                    force_fetch.call_args.kwargs["history_start"],
+                    first_signal_date
+                    - timedelta(days=core.FULL_HISTORY_LOOKBACK_DAYS),
+                )
+
+            disabled_root = cache_root / "disabled"
+            with (
+                patch.object(core, "HISTORY_CACHE_ROOT", disabled_root),
+                patch.object(
+                    core,
+                    "_fetch_eastmoney_full_history",
+                    return_value=fresh_history,
+                ),
+            ):
+                core._load_one_history(
+                    code,
+                    cache_key="disabled",
+                    first_signal_date=first_signal_date,
+                    end_date=end_date,
+                    cache_hours=0.0,
+                    force_refresh=False,
+                    limiter=core.strategy_app.RequestRateLimiter(0.0),
+                    timeout_seconds=1.0,
+                )
+                self.assertFalse(
+                    core._history_cache_path("disabled", code).exists()
+                )
+
+
 class HistoryEligibilityTests(TestCase):
     @staticmethod
     def _short_history() -> pd.DataFrame:
@@ -1093,6 +1429,53 @@ class FullFactorCacheIsolationTests(TestCase):
 
 
 class FullFactorParallelismTests(TestCase):
+    def test_factor_collectors_preserve_company_industry(self) -> None:
+        history = FullFactorWindowEquivalenceTests._history(seed=25.0)
+        signal_day = pd.Timestamp(
+            history["date"].iloc[core.strategy_app.INDICATOR_WARMUP_BARS - 1]
+        ).date()
+        companies = pd.DataFrame(
+            [
+                {
+                    "序号": 1,
+                    "股票代码": "000001",
+                    "股票名称": "测试一",
+                    "所属行业": "电子",
+                }
+            ]
+        )
+        outcomes = {
+            "000001": core.HistoryOutcome(
+                code="000001",
+                history=history,
+                source="测试",
+                from_cache=True,
+                cache_token="history-one",
+            )
+        }
+
+        with patch.object(core, "_basic_prefilter_dates", return_value={signal_day}):
+            fixed_rows, _, fixed_errors = core.collect_factor_rows_by_day(
+                companies,
+                outcomes,
+                (signal_day,),
+                cache_key="test-industry-fixed",
+                cache_hours=0.0,
+            )
+        full_rows, _, full_errors = core.collect_all_factor_rows_by_day(
+            companies,
+            outcomes,
+            (signal_day,),
+            cache_key="test-industry-full",
+            cache_hours=0.0,
+            factor_workers=1,
+        )
+
+        self.assertTrue(fixed_errors.empty)
+        self.assertTrue(full_errors.empty)
+        self.assertEqual(fixed_rows[signal_day][0]["所属行业"], "电子")
+        self.assertEqual(full_rows[signal_day][0]["所属行业"], "电子")
+
     def test_full_factor_panel_uses_thread_pool_for_parallel_calculation(self) -> None:
         first_history = FullFactorWindowEquivalenceTests._history(seed=25.0)
         second_history = FullFactorWindowEquivalenceTests._history(seed=80.0)
@@ -1139,4 +1522,3 @@ class FullFactorParallelismTests(TestCase):
         self.assertTrue(errors.empty)
         self.assertEqual(len(rows_by_day[signal_day]), 2)
         self.assertEqual(day_stats[signal_day]["因子计算失败数"], 0)
-
