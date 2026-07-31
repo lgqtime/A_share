@@ -758,6 +758,37 @@ class DailyTradingRunnerTests(unittest.TestCase):
             ["000003"],
         )
 
+        late_final_snapshot = {
+            "000004": runner.intraday.Quote(
+                "000004", runner.intraday.Decimal("9.15"), runner.intraday.Decimal("10"),
+                "2026-07-28 09:46:31",
+            )
+        }
+        self.assertEqual(
+            runner._stale_quote_codes(
+                late_final_snapshot,
+                date(2026, 7, 28),
+                observed_at=datetime(2026, 7, 28, 9, 46, 30),
+                final_report=True,
+            ),
+            ["000004"],
+        )
+        future_final_snapshot = {
+            "000005": runner.intraday.Quote(
+                "000005", runner.intraday.Decimal("9.15"), runner.intraday.Decimal("10"),
+                "2026-07-28 09:45:06",
+            )
+        }
+        self.assertEqual(
+            runner._stale_quote_codes(
+                future_final_snapshot,
+                date(2026, 7, 28),
+                observed_at=datetime(2026, 7, 28, 9, 45),
+                final_report=True,
+            ),
+            ["000005"],
+        )
+
     def test_committing_final_monitor_record_recovers_without_fetching_quotes(self) -> None:
         monitor_day = date(2026, 7, 28)
         prediction_day = date(2026, 7, 27)
@@ -896,6 +927,9 @@ class DailyTradingRunnerTests(unittest.TestCase):
                     runner.intraday, "collect_complete_snapshot", return_value=snapshot
                 ),
                 patch.object(
+                    runner.intraday, "collect_available_snapshot", return_value=snapshot
+                ),
+                patch.object(
                     runner, "_stale_quote_codes", wraps=runner._stale_quote_codes
                 ) as stale_quotes,
                 patch.object(runner.intraday, "select_triggers") as select_triggers,
@@ -919,20 +953,20 @@ class DailyTradingRunnerTests(unittest.TestCase):
                     snapshot,
                     monitor_day,
                     observed_at=snapshot_completed_at,
-                    require_final_minute=False,
+                    final_report=False,
                 ),
                 call(
                     snapshot,
                     monitor_day,
                     observed_at=window_end,
-                    require_final_minute=True,
+                    final_report=True,
                 ),
             ]
         )
         select_triggers.assert_not_called()
 
-    def test_monitor_rejects_pre_0945_quote_for_the_final_report(self) -> None:
-        """The fixed report must not use a quote from before the 09:45 minute."""
+    def test_monitor_accepts_a_fresh_pre_0945_quote_for_the_final_report(self) -> None:
+        """The fixed report accepts a fresh quote from the 09:45-adjacent window."""
         monitor_day = date(2026, 7, 28)
         prediction_day = date(2026, 7, 27)
         candidate = runner.intraday.Candidate("000001", "Test", 1)
@@ -973,12 +1007,13 @@ class DailyTradingRunnerTests(unittest.TestCase):
                 patch.object(
                     runner.intraday, "collect_complete_snapshot", return_value=snapshot
                 ),
-                patch.object(runner.intraday, "select_triggers") as select_triggers,
+                patch.object(runner.intraday, "select_triggers", return_value=[]),
                 patch.object(runner, "_write_realtime_artifacts"),
                 patch.object(runner, "update_state"),
                 patch.object(runner, "_send_notification_once"),
+                patch.object(runner, "_commit_final_monitor_record") as commit_final,
             ):
-                runner.run_monitor(
+                result = runner.run_monitor(
                     paths,
                     monitor_day=monitor_day,
                     no_push=True,
@@ -987,7 +1022,145 @@ class DailyTradingRunnerTests(unittest.TestCase):
                     logger=Mock(),
                 )
 
-        select_triggers.assert_not_called()
+        self.assertEqual(result, 0)
+        commit_final.assert_called_once()
+        final_record = commit_final.call_args.args[3]
+        self.assertEqual(final_record[runner.SIGNAL_COLUMNS[11]], runner.FINAL_MAX_DECLINE_STATUS)
+        self.assertEqual(final_record[runner.SIGNAL_COLUMNS[12]], candidate.code)
+
+    def test_final_report_ignores_missing_quotes_and_keeps_the_first_tied_decline(self) -> None:
+        monitor_day = date(2026, 7, 28)
+        prediction_day = date(2026, 7, 27)
+        candidates = [
+            runner.intraday.Candidate("000002", "First", 1),
+            runner.intraday.Candidate("000001", "Second", 2),
+            runner.intraday.Candidate("000003", "Missing", 3),
+        ]
+        partial_snapshot = {
+            "000002": runner.intraday.Quote(
+                "000002", runner.intraday.Decimal("9.70"), runner.intraday.Decimal("10"),
+                "2026-07-28 09:44:30",
+            ),
+            "000001": runner.intraday.Quote(
+                "000001", runner.intraday.Decimal("9.70"), runner.intraday.Decimal("10"),
+                "2026-07-28 09:45:00",
+            ),
+        }
+        final_observed_at = datetime(2026, 7, 28, 9, 45, tzinfo=runner.CHINA_TIMEZONE)
+
+        with TemporaryDirectory() as temporary_directory:
+            paths = runner.PipelinePaths(Path(temporary_directory))
+            candidate_path = paths.archive_for(prediction_day) / paths.top_fifty.name
+            candidate_path.parent.mkdir(parents=True, exist_ok=True)
+            candidate_path.touch()
+            prediction = dict.fromkeys(runner.SIGNAL_COLUMNS, "")
+            prediction[runner.SIGNAL_COLUMNS[0]] = prediction_day.isoformat()
+            clock_values = iter((final_observed_at, final_observed_at, final_observed_at))
+
+            with (
+                patch.object(
+                    runner,
+                    "china_now",
+                    side_effect=lambda: next(clock_values, final_observed_at),
+                ),
+                patch.object(runner, "_load_current_signal", return_value=prediction),
+                patch.object(runner, "state_section", return_value={"status": "completed"}),
+                patch.object(runner, "_use_batch_quotes", return_value=False),
+                patch.object(runner, "_validate_monitor_request_budget", return_value=3),
+                patch.object(runner.intraday, "read_candidates", return_value=candidates),
+                patch.object(runner.intraday, "get_token", return_value="unused"),
+                patch.object(runner.intraday, "ZhituApiClient"),
+                patch.object(
+                    runner.intraday,
+                    "collect_available_snapshot",
+                    return_value=partial_snapshot,
+                ) as collect_available,
+                patch.object(runner.intraday, "select_triggers", return_value=[]),
+                patch.object(runner, "update_state"),
+                patch.object(runner, "_commit_final_monitor_record") as commit_final,
+                patch.object(runner, "_send_notification_once") as send_notification,
+            ):
+                result = runner.run_monitor(
+                    paths,
+                    monitor_day=monitor_day,
+                    no_push=True,
+                    force=False,
+                    interval_seconds=60,
+                    logger=Mock(),
+                )
+
+        self.assertEqual(result, 0)
+        collect_available.assert_called_once()
+        self.assertEqual(
+            [call.args[2] for call in send_notification.call_args_list],
+            [runner.MONITOR_FINAL_NOTIFICATION_KEY],
+        )
+        final_record = commit_final.call_args.args[3]
+        self.assertEqual(final_record[runner.SIGNAL_COLUMNS[12]], "000002")
+        self.assertIn("2/3", final_record[runner.SIGNAL_COLUMNS[22]])
+        self.assertIn(
+            "可用行情",
+            runner._monitor_notification_title(final_record, monitor_day),
+        )
+
+    def test_final_report_rejects_a_snapshot_completed_after_the_deadline(self) -> None:
+        monitor_day = date(2026, 7, 28)
+        prediction_day = date(2026, 7, 27)
+        candidate = runner.intraday.Candidate("000001", "First", 1)
+        snapshot = {
+            candidate.code: runner.intraday.Quote(
+                candidate.code,
+                runner.intraday.Decimal("9.70"),
+                runner.intraday.Decimal("10"),
+                "2026-07-28 09:45:00",
+            )
+        }
+        started_at = datetime(2026, 7, 28, 9, 45, tzinfo=runner.CHINA_TIMEZONE)
+        completed_at = runner._final_snapshot_deadline(monitor_day) + timedelta(seconds=1)
+
+        with TemporaryDirectory() as temporary_directory:
+            paths = runner.PipelinePaths(Path(temporary_directory))
+            candidate_path = paths.archive_for(prediction_day) / paths.top_fifty.name
+            candidate_path.parent.mkdir(parents=True, exist_ok=True)
+            candidate_path.touch()
+            prediction = dict.fromkeys(runner.SIGNAL_COLUMNS, "")
+            prediction[runner.SIGNAL_COLUMNS[0]] = prediction_day.isoformat()
+            clock_values = iter((started_at, started_at, completed_at))
+
+            with (
+                patch.object(
+                    runner,
+                    "china_now",
+                    side_effect=lambda: next(clock_values, completed_at),
+                ),
+                patch.object(runner, "_load_current_signal", return_value=prediction),
+                patch.object(runner, "state_section", return_value={"status": "completed"}),
+                patch.object(runner, "_use_batch_quotes", return_value=False),
+                patch.object(runner, "_validate_monitor_request_budget", return_value=1),
+                patch.object(runner.intraday, "read_candidates", return_value=[candidate]),
+                patch.object(runner.intraday, "get_token", return_value="unused"),
+                patch.object(runner.intraday, "ZhituApiClient"),
+                patch.object(
+                    runner.intraday,
+                    "collect_available_snapshot",
+                    return_value=snapshot,
+                ),
+                patch.object(runner, "_commit_final_monitor_record") as commit_final,
+                patch.object(runner, "_send_notification_once"),
+            ):
+                result = runner.run_monitor(
+                    paths,
+                    monitor_day=monitor_day,
+                    no_push=True,
+                    force=False,
+                    interval_seconds=60,
+                    logger=Mock(),
+                )
+
+        self.assertEqual(result, 0)
+        final_record = commit_final.call_args.args[3]
+        self.assertNotEqual(final_record[runner.SIGNAL_COLUMNS[11]], runner.FINAL_MAX_DECLINE_STATUS)
+        self.assertEqual(final_record[runner.SIGNAL_COLUMNS[12]], "")
 
     def test_monitor_sends_each_new_trigger_and_the_0945_maximum_decline_report(self) -> None:
         monitor_day = date(2026, 7, 28)
@@ -1047,7 +1220,12 @@ class DailyTradingRunnerTests(unittest.TestCase):
                 patch.object(
                     runner.intraday,
                     "collect_complete_snapshot",
-                    side_effect=[first_snapshot, final_snapshot],
+                    return_value=first_snapshot,
+                ),
+                patch.object(
+                    runner.intraday,
+                    "collect_available_snapshot",
+                    return_value=final_snapshot,
                 ),
                 patch.object(runner, "update_state"),
                 patch.object(runner, "_commit_final_monitor_record") as commit_final,
@@ -1136,7 +1314,12 @@ class DailyTradingRunnerTests(unittest.TestCase):
                 patch.object(
                     runner.intraday,
                     "collect_complete_snapshot",
-                    side_effect=[first_snapshot, final_snapshot],
+                    return_value=first_snapshot,
+                ),
+                patch.object(
+                    runner.intraday,
+                    "collect_available_snapshot",
+                    return_value=final_snapshot,
                 ),
                 patch.object(runner, "update_state"),
                 patch.object(runner, "_commit_final_monitor_record") as commit_final,

@@ -164,12 +164,19 @@ class ZhituApiClient:
             raise ValueError("Unexpected quote response format.")
         return self._quote_from_payload(payload, code)
 
-    def get_quotes(self, codes: Iterable[str], *, use_batch: bool = True) -> dict[str, Quote]:
-        """Fetch a complete code-to-quote mapping, in batches of at most 20 codes.
+    def get_quotes(
+        self,
+        codes: Iterable[str],
+        *,
+        use_batch: bool = True,
+        allow_partial: bool = False,
+    ) -> dict[str, Quote]:
+        """Fetch quote mappings in batches of at most 20 codes.
 
         The public multi-stock endpoint is the default because it keeps each
         monitoring round far below the API request limit.  Callers that need
-        the legacy per-stock behavior can pass ``use_batch=False``.
+        the legacy per-stock behavior can pass ``use_batch=False``. Set
+        ``allow_partial`` only when an incomplete result is explicitly safe.
         """
         requested_codes = [self._validate_code(code) for code in codes]
         if len(set(requested_codes)) != len(requested_codes):
@@ -178,25 +185,41 @@ class ZhituApiClient:
             return {}
 
         if not use_batch:
-            return {code: self.get_quote(code) for code in requested_codes}
+            quotes: dict[str, Quote] = {}
+            for code in requested_codes:
+                try:
+                    quotes[code] = self.get_quote(code)
+                except (requests.RequestException, ValueError):
+                    if not allow_partial:
+                        raise
+            return {code: quotes[code] for code in requested_codes if code in quotes}
 
         quotes: dict[str, Quote] = {}
         for start in range(0, len(requested_codes), MAX_BATCH_CODES):
             batch_codes = requested_codes[start : start + MAX_BATCH_CODES]
-            response = self._session.get(
-                BATCH_API_URL,
-                params={"token": self._token, "stock_codes": ",".join(batch_codes)},
-                timeout=self._timeout_seconds,
-            )
-            response.raise_for_status()
-            batch_quotes = self._parse_batch_payload(response.json(), set(batch_codes))
+            try:
+                response = self._session.get(
+                    BATCH_API_URL,
+                    params={"token": self._token, "stock_codes": ",".join(batch_codes)},
+                    timeout=self._timeout_seconds,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if allow_partial:
+                    batch_quotes = self._parse_partial_batch_payload(payload, set(batch_codes))
+                else:
+                    batch_quotes = self._parse_batch_payload(payload, set(batch_codes))
+            except (requests.RequestException, ValueError):
+                if not allow_partial:
+                    raise
+                continue
             quotes.update(batch_quotes)
 
         # This guards against any accidental change to per-batch validation.
         missing_codes = set(requested_codes) - set(quotes)
-        if missing_codes:
+        if missing_codes and not allow_partial:
             raise ValueError(f"Batch quote response is missing codes: {', '.join(sorted(missing_codes))}")
-        return {code: quotes[code] for code in requested_codes}
+        return {code: quotes[code] for code in requested_codes if code in quotes}
 
     @staticmethod
     def _validate_code(value: object) -> str:
@@ -253,6 +276,27 @@ class ZhituApiClient:
             raise ValueError(f"Batch quote response is missing codes: {', '.join(sorted(missing_codes))}")
         return quotes
 
+    @classmethod
+    def _parse_partial_batch_payload(
+        cls, payload: object, expected_codes: set[str]
+    ) -> dict[str, Quote]:
+        """Keep valid items when a final-report batch has isolated bad rows."""
+        if not isinstance(payload, list):
+            raise ValueError("Unexpected batch quote response format.")
+
+        quotes: dict[str, Quote] = {}
+        for item in payload:
+            if not isinstance(item, Mapping):
+                continue
+            try:
+                code = cls._validate_code(item.get("dm", ""))
+                if code not in expected_codes or code in quotes:
+                    continue
+                quotes[code] = cls._quote_from_payload(item, code)
+            except ValueError:
+                continue
+        return quotes
+
 
 def collect_complete_snapshot(
     candidates: Iterable[Candidate],
@@ -273,6 +317,43 @@ def collect_complete_snapshot(
     missing_codes = [code for code in candidate_codes if code not in quotes]
     if missing_codes:
         logger.warning("Discarded incomplete snapshot; failed codes: %s", ", ".join(missing_codes))
+        return None
+    return quotes
+
+
+def collect_available_snapshot(
+    candidates: Iterable[Candidate],
+    client: ZhituApiClient,
+    logger: logging.Logger,
+    *,
+    use_batch: bool = True,
+) -> dict[str, Quote] | None:
+    """Return usable quotes for a best-effort final report.
+
+    Unlike the monitoring path, a single unavailable code does not invalidate
+    the final maximum-decline comparison.
+    """
+    candidate_list = list(candidates)
+    candidate_codes = [candidate.code for candidate in candidate_list]
+    try:
+        quotes = client.get_quotes(
+            candidate_codes,
+            use_batch=use_batch,
+            allow_partial=True,
+        )
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Quote request failed for final report: %s", exc)
+        return None
+
+    missing_codes = [code for code in candidate_codes if code not in quotes]
+    if missing_codes:
+        logger.warning(
+            "Ignored %s unavailable final-report quotes; examples: %s",
+            len(missing_codes),
+            ", ".join(missing_codes[:5]),
+        )
+    if not quotes:
+        logger.warning("No usable quotes were returned for the final report.")
         return None
     return quotes
 
@@ -307,12 +388,13 @@ def select_largest_decline(
     selections = [
         Trigger(candidate=candidate, quote=quotes[candidate.code])
         for candidate in candidates
+        if candidate.code in quotes
     ]
     if not selections:
         return None
 
-    # More negative change wins; rank and code make every tie deterministic.
-    return min(selections, key=_trigger_sort_key)
+    # min() is stable, so equal declines keep the first candidate-list entry.
+    return min(selections, key=lambda trigger: trigger.quote.change_percent)
 
 
 def format_trigger(trigger: Trigger, observed_at: datetime) -> str:

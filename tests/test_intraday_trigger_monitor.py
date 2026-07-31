@@ -4,12 +4,15 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock
 
+import requests
+
 from intraday_trigger_monitor import (
     BATCH_API_URL,
     API_URL,
     Candidate,
     Quote,
     ZhituApiClient,
+    collect_available_snapshot,
     collect_complete_snapshot,
     read_candidates,
     select_largest_decline,
@@ -111,6 +114,21 @@ class TriggerSelectionTests(unittest.TestCase):
         self.assertIsNotNone(selection)
         self.assertEqual(selection.candidate.code, "000002")
 
+    def test_largest_decline_tie_keeps_the_first_candidate_in_sequence(self) -> None:
+        candidates = [
+            Candidate("000002", "First", 2),
+            Candidate("000001", "Second", 1),
+        ]
+        quotes = {
+            "000001": make_quote("000001", "9.60", "10.00"),
+            "000002": make_quote("000002", "9.60", "10.00"),
+        }
+
+        selection = select_largest_decline(candidates, quotes)
+
+        self.assertIsNotNone(selection)
+        self.assertEqual(selection.candidate.code, "000002")
+
     def test_read_candidates_preserves_leading_zeroes(self) -> None:
         header = "评分排名,股票代码,股票名称,所属行业\n"
         rows = [f"{index},{index},Stock {index},C 制造业\n" for index in range(1, 51)]
@@ -190,6 +208,52 @@ class ZhituApiClientTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, r"missing codes: 000002"):
             client.get_quotes(["000001", "000002"])
+
+    def test_partial_batch_quotes_keep_the_available_codes(self) -> None:
+        session = Mock()
+        session.get.return_value = make_response([make_batch_item("000001")])
+        client = ZhituApiClient("test-token", session=session)
+
+        quotes = client.get_quotes(
+            ["000001", "000002"],
+            allow_partial=True,
+        )
+
+        self.assertEqual(list(quotes), ["000001"])
+
+    def test_partial_batch_quotes_skip_only_a_failed_batch(self) -> None:
+        codes = [f"{number:06d}" for number in range(1, 22)]
+        failed_response = Mock()
+        failed_response.raise_for_status.side_effect = requests.HTTPError("temporary failure")
+        session = Mock()
+        session.get.side_effect = [
+            make_response([make_batch_item(code) for code in codes[:20]]),
+            failed_response,
+        ]
+        client = ZhituApiClient("test-token", session=session)
+
+        quotes = client.get_quotes(codes, allow_partial=True)
+
+        self.assertEqual(list(quotes), codes[:20])
+
+    def test_final_snapshot_ignores_a_failed_single_stock_request(self) -> None:
+        session = Mock()
+        failed_response = Mock()
+        failed_response.raise_for_status.side_effect = requests.HTTPError("temporary failure")
+        session.get.side_effect = [make_response(make_batch_item("000001")), failed_response]
+        client = ZhituApiClient("test-token", session=session)
+        logger = Mock()
+
+        snapshot = collect_available_snapshot(
+            [Candidate("000001", "First", 1), Candidate("000002", "Second", 2)],
+            client,
+            logger,
+            use_batch=False,
+        )
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(list(snapshot), ["000001"])
+        logger.warning.assert_called_once()
 
     def test_complete_snapshot_discards_a_batch_with_missing_code(self) -> None:
         session = Mock()

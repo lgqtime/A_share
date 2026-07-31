@@ -40,6 +40,7 @@ CHINA_TIMEZONE = ZoneInfo("Asia/Shanghai")
 AFTER_CLOSE_READY_TIME = time(16, 30)
 MONITOR_START_TIME = time(9, 28)
 MONITOR_END_TIME = time(9, 45)
+FINAL_QUOTE_EARLIEST_TIME = time(9, 44)
 FINAL_MAX_DECLINE_STATUS = "09:45候选池最大跌幅"
 MONITOR_FINAL_NOTIFICATION_KEY = "monitor-final"
 MONITOR_TRIGGER_NOTIFICATION_PREFIX = "monitor-trigger-"
@@ -48,6 +49,7 @@ MINIMUM_MONITOR_INTERVAL_SECONDS = 60
 DEFAULT_DAILY_QUOTE_LIMIT = 200
 DEFAULT_QUOTE_RATE_LIMIT_PER_MINUTE = 1_000
 MAX_QUOTE_AGE_SECONDS = 90
+MAX_QUOTE_FUTURE_SKEW_SECONDS = 5
 DEFAULT_WORKERS = 4
 DEFAULT_REQUEST_INTERVAL_SECONDS = 0.25
 DEFAULT_TIMEOUT_SECONDS = 15.0
@@ -1333,7 +1335,7 @@ def _send_notification_once(
 
 def _monitor_notification_title(record: Mapping[str, object], monitor_day: date) -> str:
     if str(record.get("实时状态", "")) == FINAL_MAX_DECLINE_STATUS:
-        return f"深市主板09:45候选池最大跌幅 {monitor_day.isoformat()}"
+        return f"深市主板09:45可用行情最大跌幅 {monitor_day.isoformat()}"
     return f"深市主板实时检测 {monitor_day.isoformat()}"
 
 
@@ -1698,37 +1700,48 @@ def _quote_timestamp(value: str) -> datetime | None:
     return pd.Timestamp(timestamp).to_pydatetime()
 
 
+def _final_snapshot_deadline(monitor_day: date) -> datetime:
+    return datetime.combine(
+        monitor_day, MONITOR_END_TIME, CHINA_TIMEZONE
+    ) + timedelta(seconds=MAX_QUOTE_AGE_SECONDS)
+
+
 def _stale_quote_codes(
     snapshot: Mapping[str, intraday.Quote],
     monitor_day: date,
     *,
     observed_at: datetime | None = None,
-    require_final_minute: bool = False,
+    final_report: bool = False,
 ) -> list[str]:
     stale: list[str] = []
     observed_local = observed_at
     if observed_local is not None and observed_local.tzinfo is not None:
         observed_local = observed_local.astimezone(CHINA_TIMEZONE).replace(tzinfo=None)
+    final_quote_deadline = _final_snapshot_deadline(monitor_day).replace(tzinfo=None)
     for code, quote in snapshot.items():
         timestamp = _quote_timestamp(quote.updated_at)
         if timestamp is not None and timestamp.tzinfo is not None:
             timestamp = timestamp.astimezone(CHINA_TIMEZONE).replace(tzinfo=None)
         quote_time = timestamp.time() if timestamp is not None else None
-        is_final_minute = bool(
-            quote_time is not None
-            and quote_time.hour == MONITOR_END_TIME.hour
-            and quote_time.minute == MONITOR_END_TIME.minute
+        earliest_quote_time = (
+            FINAL_QUOTE_EARLIEST_TIME if final_report else MONITOR_START_TIME
         )
         if (
             timestamp is None
             or timestamp.date() != monitor_day
             or quote_time is None
-            or quote_time < MONITOR_START_TIME
-            or (require_final_minute and not is_final_minute)
-            or (not require_final_minute and quote_time >= MONITOR_END_TIME)
+            or quote_time < earliest_quote_time
+            or (not final_report and quote_time >= MONITOR_END_TIME)
+            or (final_report and timestamp > final_quote_deadline)
             or (
                 observed_local is not None
                 and (observed_local - timestamp).total_seconds() > MAX_QUOTE_AGE_SECONDS
+            )
+            or (
+                final_report
+                and observed_local is not None
+                and timestamp
+                > observed_local + timedelta(seconds=MAX_QUOTE_FUTURE_SKEW_SECONDS)
             )
         ):
             stale.append(code)
@@ -2086,9 +2099,7 @@ def run_monitor(
 
     now = china_now()
     current_time = now.timetz().replace(tzinfo=None)
-    final_snapshot_deadline = datetime.combine(
-        now.date(), MONITOR_END_TIME, CHINA_TIMEZONE
-    ) + timedelta(seconds=MAX_QUOTE_AGE_SECONDS)
+    final_snapshot_deadline = _final_snapshot_deadline(monitor_day)
     if now > final_snapshot_deadline:
         record = _realtime_record(
             prediction,
@@ -2200,10 +2211,17 @@ def run_monitor(
         snapshot: dict[str, intraday.Quote] | None,
         observed_at: datetime,
         *,
-        require_final_minute: bool,
+        final_report: bool,
+        allow_partial: bool = False,
     ) -> dict[str, intraday.Quote] | None:
         nonlocal successful_snapshots, current_day_quote_seen
         if snapshot is None:
+            return None
+        if final_report and observed_at > final_snapshot_deadline:
+            logger.warning(
+                "Discarded 09:45 snapshot completed after the final deadline: %s",
+                observed_at,
+            )
             return None
         successful_snapshots += 1
         current_day_quote_seen = current_day_quote_seen or _has_current_day_quote(
@@ -2213,18 +2231,31 @@ def run_monitor(
             snapshot,
             monitor_day,
             observed_at=observed_at,
-            require_final_minute=require_final_minute,
+            final_report=final_report,
         )
+        label = "09:45" if final_report else "monitoring"
         if stale_codes:
-            label = "09:45" if require_final_minute else "monitoring"
             logger.warning(
                 "Discarded stale %s quote snapshot for %s codes; examples: %s",
                 label,
                 len(stale_codes),
                 ", ".join(stale_codes[:5]),
             )
+            if not allow_partial:
+                return None
+            stale_code_set = set(stale_codes)
+            snapshot = {
+                code: quote for code, quote in snapshot.items() if code not in stale_code_set
+            }
+        available_candidates = [
+            candidate for candidate in candidates if candidate.code in snapshot
+        ]
+        if not available_candidates:
+            logger.warning("No usable %s quotes remain after validation.", label)
             return None
-        send_trigger_notifications(intraday.select_triggers(candidates, snapshot), observed_at)
+        send_trigger_notifications(
+            intraday.select_triggers(available_candidates, snapshot), observed_at
+        )
         return snapshot
 
     while True:
@@ -2245,7 +2276,7 @@ def run_monitor(
         valid_snapshot = validate_snapshot(
             snapshot,
             snapshot_observed_at,
-            require_final_minute=snapshot_reached_final_minute,
+            final_report=snapshot_reached_final_minute,
         )
         if snapshot_reached_final_minute:
             final_snapshot = valid_snapshot
@@ -2256,7 +2287,7 @@ def run_monitor(
             time_module.sleep(delay)
 
     if final_snapshot is None:
-        snapshot = intraday.collect_complete_snapshot(
+        snapshot = intraday.collect_available_snapshot(
             candidates,
             client,
             logger,
@@ -2266,7 +2297,8 @@ def run_monitor(
         final_snapshot = validate_snapshot(
             snapshot,
             snapshot_observed_at,
-            require_final_minute=True,
+            final_report=True,
+            allow_partial=True,
         )
         if final_snapshot is not None:
             final_snapshot_observed_at = snapshot_observed_at
@@ -2274,14 +2306,21 @@ def run_monitor(
     if final_snapshot is not None and final_snapshot_observed_at is not None:
         largest_decline = intraday.select_largest_decline(candidates, final_snapshot)
         if largest_decline is None:
-            raise PipelineError("09:45完整候选池行情为空，无法确定最大跌幅股票。")
+            raise PipelineError("09:45可用行情为空，无法确定最大跌幅股票。")
+        ignored_quote_count = len(candidates) - len(final_snapshot)
+        coverage_note = (
+            f"本次可用行情 {len(final_snapshot)}/{len(candidates)}，已忽略 "
+            f"{ignored_quote_count} 只失败或过期股票；"
+            if ignored_quote_count
+            else ""
+        )
         if triggered_codes:
             note = (
                 f"09:45定时推送：本时段已有 {len(triggered_codes)} 只候选股触发条件；"
-                "此为09:45候选池跌幅最大股票。"
+                f"{coverage_note}此为09:45可用行情中跌幅最大股票。"
             )
         else:
-            note = "本时段无触发股票；按规则推送09:45候选池跌幅最大股票。"
+            note = f"本时段无触发股票；{coverage_note}按规则推送09:45可用行情中跌幅最大股票。"
         record = _realtime_record(
             prediction,
             monitor_day,
@@ -2318,7 +2357,7 @@ def run_monitor(
         logger.info("Realtime monitor skipped for %s: %s", monitor_day, note)
         return 0
     status = "行情异常"
-    note = "未取得可确认的当日09:45完整候选池行情，未伪造最大跌幅推送。"
+    note = "未取得可确认的当日09:45附近可用行情，未推送最大跌幅。"
     record = _realtime_record(prediction, monitor_day, status=status, note=note)
     _commit_final_monitor_record(paths, prediction_day, monitor_day, record)
     _send_notification_once(
