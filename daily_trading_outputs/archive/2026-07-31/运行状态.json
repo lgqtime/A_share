@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "trading_day": "2026-07-31",
+  "stages": {
+    "monitor": {
+      "updated_at": "2026-07-31T09:45:05.258015+08:00",
+      "status": "completed",
+      "result": {
+        "预测日期": "2026-07-30",
+        "数据截至日期": "2026-07-30",
+        "预测状态": "已生成",
+        "预测股票代码": "001221",
+        "预测股票名称": "悍高集团",
+        "预测所属行业": null,
+        "预测排名": "1",
+        "预测得分": "9.5",
+        "风险过滤后候选数": "1",
+        "未过滤前50数": "50",
+        "监控日期": "2026-07-31",
+        "实时状态": "行情异常",
+        "实时股票代码": "",
+        "实时股票名称": "",
+        "实时所属行业": "",
+        "实时候选排名": "",
+        "实时最新价": "",
+        "实时昨收价": "",
+        "实时跌幅（%）": "",
+        "实时触发时间": "",
+        "行情更新时间": "",
+        "更新时间": "2026-07-31T09:45:05.208986+08:00",
+        "备注": "未取得可确认的当日09:45完整候选池行情，未伪造最大跌幅推送。"
+      }
+    },
+    "after_close": {
+      "updated_at": "2026-08-03T01:53:10.987312+08:00",
+      "status": "completed",
+      "factor_summary": {
+        "总数": 1488,
+        "缓存命中": 0,
+        "成功": 1480,
+        "失败": 8,
+        "有效因子": 1480,
+        "排除": 8,
+        "收益异常排除": 5
+      },
+      "excluded_factor_codes": [
+        "001220",
+        "001237",
+        "001248",
+        "001257",
+        "001312",
+        "001325",
+        "001369",
+        "001396"
+      ],
+      "excluded_factor_count": 8,
+      "return_failure_codes": [
+        "001330",
+        "001365",
+        "001393",
+        "001399",
+        "002828"
+      ],
+      "missing_return_codes": [],
+      "return_excluded_codes": [
+        "001330",
+        "001365",
+        "001393",
+        "001399",
+        "002828"
+      ],
+      "return_excluded_count": 5,
+      "stock_pool": {
+        "status": "refreshed",
+        "source": "zhitu",
+        "source_day": "2026-08-03",
+        "fallback_reason": "连续 3 次均未能从深交所公开接口获取有效 JSON：('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
+        "unknown_industry_codes": [],
+        "unknown_industry_count": 0,
+        "failed_zhitu_codes": [],
+        "failed_zhitu_count": 0,
+        "zhitu_request_count": 1493
+      },
+      "return_rows_appended": 1488,
+      "fixed_parameter_file": "D:\\IndicatorScreening_Asheres\\strategy_backtest\\outputs\\rolling_parameter_updates\\rolling_parameter_optimization_current.json",
+      "top_fifty_file": "D:\\IndicatorScreening_Asheres\\前 50 名（含所属行业）.csv",
+      "combined_signal_file": "D:\\IndicatorScreening_Asheres\\每日交易信号.csv"
+    }
+  },
+  "notifications": {
+    "monitor-trigger-002580": {
+      "status": "sent",
+      "sent_at": "2026-07-31T09:28:08.581253+08:00",
+      "title": "深市主板实时触发 2026-07-31"
+    },
+    "monitor-trigger-002702": {
+      "status": "sent",
+      "sent_at": "2026-07-31T09:32:08.204576+08:00",
+      "title": "深市主板实时触发 2026-07-31"
+    },
+    "monitor-final": {
+      "status": "sent",
+      "sent_at": "2026-07-31T09:45:06.980548+08:00",
+      "title": "深市主板实时检测 2026-07-31"
+    }
+  }
+}

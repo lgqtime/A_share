@@ -5,6 +5,8 @@ description = "Standalone Streamlit A-share technical indicator screening tool"
 requires-python = ">=3.10"
 dependencies = [
     "altair>=6.2,<7",
+    "dotenv>=0.9.9",
+    "flask>=3.1.3",
     "numpy>=1.26",
     "openpyxl>=3.1.5",
     "pandas>=2.2",

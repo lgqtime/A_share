@@ -608,6 +608,7 @@ class DailyTradingRunnerTests(unittest.TestCase):
                     "股票名称": ["甲公司"],
                     "所属行业": ["金融业"],
                     "得分": [9.5],
+                    "未满足条件（扣分项）": ["无"],
                 }
             )
             unfiltered_ranked = pd.DataFrame(
@@ -638,8 +639,19 @@ class DailyTradingRunnerTests(unittest.TestCase):
             self.assertEqual(prediction.record["风险过滤后候选数"], 1)
             self.assertEqual(prediction.record["未过滤前50数"], 50)
             self.assertTrue(paths.top_fifty.is_file())
+            risk_filtered = pd.read_csv(
+                paths.archive_for(date(2026, 7, 28)) / "风险过滤后得分前10.csv",
+                encoding="utf-8-sig",
+                dtype=str,
+            )
+            self.assertEqual(
+                list(risk_filtered[["股票代码", "股票名称", "未满足条件（扣分项）"]].iloc[0]),
+                ["000001", "甲公司", "无"],
+            )
             signal = pd.read_csv(paths.combined_signal, encoding="utf-8-sig", dtype=str)
             self.assertEqual(signal.iloc[0]["预测所属行业"], "金融业")
+            self.assertFalse(score.call_args_list[0].kwargs["require_all"])
+            self.assertTrue(score.call_args_list[0].kwargs["selected_risks"])
             self.assertEqual(score.call_args_list[1].kwargs["selected_risks"], {})
             self.assertFalse(score.call_args_list[1].kwargs["require_all"])
 

@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "trading_day": "2026-08-05",
+  "stages": {
+    "monitor": {
+      "updated_at": "2026-08-05T09:39:08.236363+08:00",
+      "status": "monitoring",
+      "triggered_codes": [
+        "001223",
+        "002659"
+      ]
+    },
+    "after_close": {
+      "updated_at": "2026-08-06T01:49:46.134052+08:00",
+      "status": "completed",
+      "factor_summary": {
+        "总数": 1485,
+        "缓存命中": 0,
+        "成功": 1480,
+        "失败": 5,
+        "有效因子": 1480,
+        "排除": 5,
+        "收益异常排除": 9
+      },
+      "excluded_factor_codes": [
+        "001220",
+        "001257",
+        "001312",
+        "001369",
+        "001396"
+      ],
+      "excluded_factor_count": 5,
+      "return_failure_codes": [
+        "000838",
+        "001232",
+        "001237",
+        "001239",
+        "001248",
+        "001330",
+        "001365",
+        "001393",
+        "001399"
+      ],
+      "missing_return_codes": [],
+      "return_excluded_codes": [
+        "000838",
+        "001232",
+        "001237",
+        "001239",
+        "001248",
+        "001330",
+        "001365",
+        "001393",
+        "001399"
+      ],
+      "return_excluded_count": 9,
+      "stock_pool": {
+        "status": "refreshed",
+        "source": "szse",
+        "source_day": "2026-08-06",
+        "fallback_reason": "",
+        "unknown_industry_codes": [],
+        "unknown_industry_count": 0,
+        "failed_zhitu_codes": [],
+        "failed_zhitu_count": 0,
+        "zhitu_request_count": 0
+      },
+      "return_rows_appended": 1485,
+      "fixed_parameter_file": "D:\\IndicatorScreening_Asheres\\strategy_backtest\\outputs\\rolling_parameter_updates\\rolling_parameter_optimization_current.json",
+      "top_fifty_file": "D:\\IndicatorScreening_Asheres\\前 50 名（含所属行业）.csv",
+      "combined_signal_file": "D:\\IndicatorScreening_Asheres\\每日交易信号.csv"
+    }
+  },
+  "notifications": {
+    "monitor-trigger-001223": {
+      "status": "sent",
+      "sent_at": "2026-08-05T09:39:08.929532+08:00",
+      "title": "深市主板实时触发 2026-08-05"
+    }
+  }
+}

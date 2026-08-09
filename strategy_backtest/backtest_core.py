@@ -51,6 +51,7 @@ DEFAULT_FACTOR_WORKERS = max(1, min(8, os.cpu_count() or 1))
 MAX_FACTOR_WORKERS = 8
 DEFAULT_REQUEST_INTERVAL_SECONDS = 0.25
 DEFAULT_TIMEOUT_SECONDS = 15.0
+MACD_PARAMS = (12,26,9)
 
 FIXED_TURNOVER_RANGE = (5.0, 10.0)
 FIXED_FLOAT_MARKET_CAP_RANGE_YI = (50.0, 200.0)
@@ -1498,10 +1499,11 @@ def _precompute_factor_bars(history: pd.DataFrame) -> pd.DataFrame:
     bars.loc[(average_loss == 0) & (average_gain > 0), "rsi14"] = 100.0
     bars.loc[(average_gain == 0) & (average_loss > 0), "rsi14"] = 0.0
 
-    ema12 = bars["close"].ewm(span=12, adjust=False, min_periods=12).mean()
-    ema26 = bars["close"].ewm(span=26, adjust=False, min_periods=26).mean()
+    fast, slow, signal = MACD_PARAMS
+    ema12 = bars["close"].ewm(span=fast, adjust=False, min_periods=fast).mean()
+    ema26 = bars["close"].ewm(span=slow, adjust=False, min_periods=slow).mean()
     bars["macd_dif"] = ema12 - ema26
-    bars["macd_dea"] = bars["macd_dif"].ewm(span=9, adjust=False, min_periods=9).mean()
+    bars["macd_dea"] = bars["macd_dif"].ewm(span=signal, adjust=False, min_periods=signal).mean()
     bars["macd_histogram"] = 2.0 * (bars["macd_dif"] - bars["macd_dea"])
     bars["macd_golden_cross"] = (
         bars["macd_dif"].gt(bars["macd_dea"])
@@ -2421,7 +2423,7 @@ def evaluate_strategy(
         "策略满分": max_score,
         "持仓规则": (
             "每个选股日仅买入一只股票：取风险过滤后的评分排名第一名；"
-            "得分相同依次按量比、收盘日内位置、成交额降序，再按股票代码升序。"
+            "得分相同依次按成交额、量比、收盘日内位置降序，再按股票代码升序。"
         ),
         "收益规则": "严格下一市场交易日收盘相对选股日收盘的前复权涨跌幅；未预测日按 0% 计入复利。",
         "预测正确规则": "仅选中股票且存在严格下一交易日收益时形成预测；涨幅大于 0% 记为正确，其余预测记为失败。",

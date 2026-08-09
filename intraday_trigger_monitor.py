@@ -1,4 +1,4 @@
-"""Monitor a ranked A-share candidate list for the first -8.5% morning signal.
+"""Monitor a ranked A-share candidate list for the first -6% morning signal.
 
 This program only reads market data and prints a signal.  It never sends orders
 to a broker.
@@ -29,7 +29,7 @@ BATCH_API_URL = "https://api.zhituapi.com/hs/public/ssjymore"
 MAX_BATCH_CODES = 20
 START_TIME = time(9, 28)
 END_TIME = time(9, 45)
-THRESHOLD_PERCENT = Decimal("-8.5")
+THRESHOLD_PERCENT = Decimal("-6")
 DEFAULT_INTERVAL_SECONDS = 60
 MINIMUM_INTERVAL_SECONDS = 60
 RANK_COLUMNS = ("评分排名", "排名（风险过滤后）")
@@ -104,8 +104,8 @@ def read_candidates(path: Path) -> list[Candidate]:
         raise ValueError(f"Candidate CSV is missing columns: {', '.join(sorted(missing_columns))}")
     if rank_column is None:
         raise ValueError(f"Candidate CSV is missing a rank column: {', '.join(RANK_COLUMNS)}")
-    if len(rows) != 50:
-        raise ValueError(f"Expected exactly 50 candidates, found {len(rows)}.")
+    # if len(rows) != 30:
+    #     raise ValueError(f"Expected exactly 50 candidates, found {len(rows)}.")
 
     candidates: list[Candidate] = []
     seen_codes: set[str] = set()

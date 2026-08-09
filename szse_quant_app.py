@@ -75,7 +75,7 @@ SOURCE_FAILURE_THRESHOLD = 3
 SOURCE_COOLDOWN_SECONDS = 30.0
 DATA_PIPELINE_VERSION = "qfq-platform-v19"
 UNKNOWN_INDUSTRY = "未分类"
-PREDICTION_REVIEW_TOP_N = 50
+PREDICTION_REVIEW_TOP_N = 30
 PREDICTION_REVIEW_RANK_COLUMN = "评分排名"
 PREDICTION_REVIEW_INDUSTRY_COUNT_COLUMN = "入选数（前50）"
 PREDICTION_REVIEW_EXPORT_PATH = MODULE_DIR / "前 50 名（含所属行业）.csv"
@@ -2539,7 +2539,7 @@ def score_and_select(
     )
     eligible["_排序成交额"] = pd.to_numeric(eligible.get("当日成交额"), errors="coerce")
     eligible = eligible.sort_values(
-        ["得分", "_排序量比", "_排序收盘位置", "_排序成交额", "股票代码"],
+        ["得分", "_排序成交额", "_排序量比", "_排序收盘位置", "股票代码"],
         ascending=[False, False, False, False, True],
         kind="stable",
         na_position="last",

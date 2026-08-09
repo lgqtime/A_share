@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "trading_day": "2026-08-04",
+  "stages": {
+    "monitor": {
+      "updated_at": "2026-08-04T09:45:06.674098+08:00",
+      "status": "completed",
+      "result": {
+        "预测日期": "2026-08-03",
+        "数据截至日期": "2026-08-03",
+        "预测状态": "已生成",
+        "预测股票代码": "000818",
+        "预测股票名称": "航锦科技",
+        "预测所属行业": null,
+        "预测排名": "1",
+        "预测得分": "9.5",
+        "风险过滤后候选数": "972",
+        "未过滤前50数": "50",
+        "监控日期": "2026-08-04",
+        "实时状态": "09:45候选池最大跌幅",
+        "实时股票代码": "002717",
+        "实时股票名称": "*ST岭南",
+        "实时所属行业": "N 公共环保",
+        "实时候选排名": 15,
+        "实时最新价": "1.05",
+        "实时昨收价": "1.09",
+        "实时跌幅（%）": "-3.6697",
+        "实时触发时间": "2026-08-04 09:45:06",
+        "行情更新时间": "2026-08-04 09:44:58",
+        "更新时间": "2026-08-04T09:45:06.516812+08:00",
+        "备注": "本时段无触发股票；按规则推送09:45可用行情中跌幅最大股票。"
+      }
+    },
+    "after_close": {
+      "updated_at": "2026-08-05T01:53:05.310359+08:00",
+      "status": "completed",
+      "factor_summary": {
+        "总数": 1484,
+        "缓存命中": 0,
+        "成功": 1479,
+        "失败": 5,
+        "有效因子": 1479,
+        "排除": 5,
+        "收益异常排除": 9
+      },
+      "excluded_factor_codes": [
+        "001220",
+        "001257",
+        "001312",
+        "001369",
+        "001396"
+      ],
+      "excluded_factor_count": 5,
+      "return_failure_codes": [
+        "000838",
+        "001237",
+        "001239",
+        "001248",
+        "001330",
+        "001365",
+        "001393",
+        "001399",
+        "002214"
+      ],
+      "missing_return_codes": [
+        "002214"
+      ],
+      "return_excluded_codes": [
+        "000838",
+        "001237",
+        "001239",
+        "001248",
+        "001330",
+        "001365",
+        "001393",
+        "001399",
+        "002214"
+      ],
+      "return_excluded_count": 9,
+      "stock_pool": {
+        "status": "refreshed",
+        "source": "zhitu",
+        "source_day": "2026-08-05",
+        "fallback_reason": "连续 3 次均未能从深交所公开接口获取有效 JSON：('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
+        "unknown_industry_codes": [],
+        "unknown_industry_count": 0,
+        "failed_zhitu_codes": [],
+        "failed_zhitu_count": 0,
+        "zhitu_request_count": 1493
+      },
+      "return_rows_appended": 1484,
+      "fixed_parameter_file": "D:\\IndicatorScreening_Asheres\\strategy_backtest\\outputs\\rolling_parameter_updates\\rolling_parameter_optimization_current.json",
+      "top_fifty_file": "D:\\IndicatorScreening_Asheres\\前 50 名（含所属行业）.csv",
+      "combined_signal_file": "D:\\IndicatorScreening_Asheres\\每日交易信号.csv"
+    }
+  },
+  "notifications": {
+    "monitor-final": {
+      "status": "sent",
+      "sent_at": "2026-08-04T09:45:07.639411+08:00",
+      "title": "深市主板09:45可用行情最大跌幅 2026-08-04"
+    }
+  }
+}

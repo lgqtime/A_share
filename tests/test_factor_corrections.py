@@ -5,6 +5,7 @@ import unittest
 import pandas as pd
 
 import szse_quant_app as app
+from strategy_backtest import szse_quant_app as legacy_backtest_app
 
 
 def factor_history() -> pd.DataFrame:
@@ -128,26 +129,28 @@ class CorrectedSelectionTests(unittest.TestCase):
                 require_all=True,
             )
 
-    def test_tied_scores_use_existing_signal_strength_instead_of_sequence(self) -> None:
+    def test_tied_scores_prefer_higher_daily_amount_before_signal_strength(self) -> None:
         factors = pd.DataFrame(
             {
                 "序号": [1, 2],
                 "股票代码": ["000001", "000002"],
                 "股票名称": ["甲", "乙"],
-                "当日成交额": [100_000_000.0, 100_000_000.0],
+                "当日成交额": [200_000_000.0, 100_000_000.0],
                 "量比": [1.1, 1.8],
                 "收盘日内位置（%）": [80.0, 70.0],
                 "数据来源": ["测试", "测试"],
             }
         )
 
-        results, _, _ = app.score_and_select(
-            factors,
-            {"amount_at_least_100m": True},
-            require_all=True,
-        )
+        for strategy_app in (app, legacy_backtest_app):
+            with self.subTest(strategy_app=strategy_app.__name__):
+                results, _, _ = strategy_app.score_and_select(
+                    factors,
+                    {"amount_at_least_100m": True},
+                    require_all=True,
+                )
 
-        self.assertEqual(results.iloc[0]["股票代码"], "000002")
+                self.assertEqual(results.iloc[0]["股票代码"], "000001")
 
 
 if __name__ == "__main__":

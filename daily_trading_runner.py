@@ -1123,7 +1123,9 @@ def build_prediction(
     settings = screening.default_screening_settings()
     screening.apply_optimized_parameter_overrides(settings, paths.current_parameter_file)
     selected, selected_risks = _selected_and_risks(settings)
-    score_options = _score_options(settings)
+    # The unattended ranking mirrors the UI's non-strict ranking mode.  Risk
+    # filters remain active through selected_risks and are applied separately.
+    score_options = {**_score_options(settings), "require_all": False}
     risk_ranked, eligible_count, _ = screening.score_and_select(
         factors,
         selected,

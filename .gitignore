@@ -1,2 +1,4 @@
 .env
 logs/
+__pycache__/
+daily_trading_outputs/scheduled_analysis/

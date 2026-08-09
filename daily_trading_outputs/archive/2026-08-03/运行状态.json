@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "trading_day": "2026-08-03",
+  "stages": {
+    "monitor": {
+      "updated_at": "2026-08-03T09:45:07.212137+08:00",
+      "status": "completed",
+      "result": {
+        "预测日期": "2026-07-31",
+        "数据截至日期": "2026-07-31",
+        "预测状态": "已生成",
+        "预测股票代码": "002553",
+        "预测股票名称": "南方精工",
+        "预测所属行业": null,
+        "预测排名": "1",
+        "预测得分": "9.5",
+        "风险过滤后候选数": "1",
+        "未过滤前50数": "50",
+        "监控日期": "2026-08-03",
+        "实时状态": "09:45候选池最大跌幅",
+        "实时股票代码": "002580",
+        "实时股票名称": "圣阳股份",
+        "实时所属行业": "C 制造业",
+        "实时候选排名": 45,
+        "实时最新价": "18.53",
+        "实时昨收价": "19.47",
+        "实时跌幅（%）": "-4.8279",
+        "实时触发时间": "2026-08-03 09:45:07",
+        "行情更新时间": "2026-08-03 09:45:09",
+        "更新时间": "2026-08-03T09:45:07.100453+08:00",
+        "备注": "本时段无触发股票；本次可用行情 48/50，已忽略 2 只失败或过期股票；按规则推送09:45可用行情中跌幅最大股票。"
+      }
+    },
+    "after_close": {
+      "updated_at": "2026-08-04T01:49:10.202091+08:00",
+      "status": "completed",
+      "factor_summary": {
+        "总数": 1485,
+        "缓存命中": 0,
+        "成功": 1480,
+        "失败": 5,
+        "有效因子": 1480,
+        "排除": 5,
+        "收益异常排除": 8
+      },
+      "excluded_factor_codes": [
+        "001220",
+        "001257",
+        "001312",
+        "001369",
+        "001396"
+      ],
+      "excluded_factor_count": 5,
+      "return_failure_codes": [
+        "000838",
+        "001237",
+        "001239",
+        "001248",
+        "001330",
+        "001365",
+        "001393",
+        "001399"
+      ],
+      "missing_return_codes": [
+        "000838",
+        "001237",
+        "001239",
+        "001248"
+      ],
+      "return_excluded_codes": [
+        "000838",
+        "001237",
+        "001239",
+        "001248",
+        "001330",
+        "001365",
+        "001393",
+        "001399"
+      ],
+      "return_excluded_count": 8,
+      "stock_pool": {
+        "status": "refreshed",
+        "source": "szse",
+        "source_day": "2026-08-04",
+        "fallback_reason": "",
+        "unknown_industry_codes": [],
+        "unknown_industry_count": 0,
+        "failed_zhitu_codes": [],
+        "failed_zhitu_count": 0,
+        "zhitu_request_count": 0
+      },
+      "return_rows_appended": 1485,
+      "fixed_parameter_file": "D:\\IndicatorScreening_Asheres\\strategy_backtest\\outputs\\rolling_parameter_updates\\rolling_parameter_optimization_current.json",
+      "top_fifty_file": "D:\\IndicatorScreening_Asheres\\前 50 名（含所属行业）.csv",
+      "combined_signal_file": "D:\\IndicatorScreening_Asheres\\每日交易信号.csv"
+    }
+  },
+  "notifications": {
+    "monitor-final": {
+      "status": "sent",
+      "sent_at": "2026-08-03T09:45:07.837490+08:00",
+      "title": "深市主板09:45可用行情最大跌幅 2026-08-03"
+    }
+  }
+}

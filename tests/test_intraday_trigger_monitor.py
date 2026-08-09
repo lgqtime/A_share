@@ -81,7 +81,7 @@ class TriggerSelectionTests(unittest.TestCase):
         trigger = select_trigger([candidate], quotes)
 
         self.assertIsNotNone(trigger)
-        self.assertEqual(trigger.quote.change_percent, Decimal("-8.500"))
+        self.assertEqual(trigger.quote.change_percent, Decimal("-6"))
 
     def test_returns_every_trigger_in_stable_order(self) -> None:
         candidates = [

@@ -1,0 +1,490 @@
+{
+  "schema_version": 1,
+  "run_date": "2026-08-03",
+  "generated_at": "2026-08-03T17:42:42+00:00",
+  "best_settings": {
+    "szse_quant_filter_rsi_range": [
+      46.2,
+      56.5
+    ],
+    "szse_quant_filter_turnover_range": [
+      5.2,
+      7.9
+    ],
+    "szse_quant_filter_volume_ratio_range": [
+      1.4,
+      2.7
+    ],
+    "szse_quant_filter_pct_change_range": [
+      3.2,
+      10.1
+    ],
+    "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+      0,
+      6
+    ],
+    "szse_quant_filter_macd_dea_minus_dif_range": [
+      0.1,
+      0.2
+    ]
+  },
+  "best_result": {
+    "settings": {
+      "szse_quant_filter_rsi_range": [
+        46.2,
+        56.5
+      ],
+      "szse_quant_filter_turnover_range": [
+        5.2,
+        7.9
+      ],
+      "szse_quant_filter_volume_ratio_range": [
+        1.4,
+        2.7
+      ],
+      "szse_quant_filter_pct_change_range": [
+        3.2,
+        10.1
+      ],
+      "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+        0,
+        6
+      ],
+      "szse_quant_filter_macd_dea_minus_dif_range": [
+        0.1,
+        0.2
+      ]
+    },
+    "total_return_pct": 148.70858859000887,
+    "prediction_days": 21,
+    "correct_days": 17,
+    "accuracy_pct": 80.95238095238095
+  },
+  "baseline_result": {
+    "settings": {
+      "szse_quant_filter_rsi_range": [
+        46.2,
+        56.5
+      ],
+      "szse_quant_filter_turnover_range": [
+        5.2,
+        7.9
+      ],
+      "szse_quant_filter_volume_ratio_range": [
+        1.4,
+        2.7
+      ],
+      "szse_quant_filter_pct_change_range": [
+        3.2,
+        10.1
+      ],
+      "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+        0,
+        6
+      ],
+      "szse_quant_filter_macd_dea_minus_dif_range": [
+        0.1,
+        0.2
+      ]
+    },
+    "total_return_pct": 148.70858859000887,
+    "prediction_days": 21,
+    "correct_days": 17,
+    "accuracy_pct": 80.95238095238095
+  },
+  "coordinate_search_trace": [
+    {
+      "pass": 1,
+      "parameter": "rsi",
+      "before": [
+        46.2,
+        56.5
+      ],
+      "after": [
+        46.2,
+        56.5
+      ],
+      "candidate_rows_after_other_rules": 42,
+      "candidate_intervals": 913,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            46.2,
+            56.5
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            7.9
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.4,
+            2.7
+          ],
+          "szse_quant_filter_pct_change_range": [
+            3.2,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            0,
+            6
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 148.70858859000887,
+        "prediction_days": 21,
+        "correct_days": 17,
+        "accuracy_pct": 80.95238095238095
+      }
+    },
+    {
+      "pass": 1,
+      "parameter": "turnover",
+      "before": [
+        5.2,
+        7.9
+      ],
+      "after": [
+        5.2,
+        7.9
+      ],
+      "candidate_rows_after_other_rules": 227,
+      "candidate_intervals": 4592,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            46.2,
+            56.5
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            7.9
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.4,
+            2.7
+          ],
+          "szse_quant_filter_pct_change_range": [
+            3.2,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            0,
+            6
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 148.70858859000887,
+        "prediction_days": 21,
+        "correct_days": 17,
+        "accuracy_pct": 80.95238095238095
+      }
+    },
+    {
+      "pass": 1,
+      "parameter": "volume_ratio",
+      "before": [
+        1.4,
+        2.7
+      ],
+      "after": [
+        1.4,
+        2.7
+      ],
+      "candidate_rows_after_other_rules": 66,
+      "candidate_intervals": 287,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            46.2,
+            56.5
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            7.9
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.4,
+            2.7
+          ],
+          "szse_quant_filter_pct_change_range": [
+            3.2,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            0,
+            6
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 148.70858859000887,
+        "prediction_days": 21,
+        "correct_days": 17,
+        "accuracy_pct": 80.95238095238095
+      }
+    },
+    {
+      "pass": 1,
+      "parameter": "pct_change",
+      "before": [
+        3.2,
+        10.1
+      ],
+      "after": [
+        3.2,
+        10.1
+      ],
+      "candidate_rows_after_other_rules": 56,
+      "candidate_intervals": 885,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            46.2,
+            56.5
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            7.9
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.4,
+            2.7
+          ],
+          "szse_quant_filter_pct_change_range": [
+            3.2,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            0,
+            6
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 148.70858859000887,
+        "prediction_days": 21,
+        "correct_days": 17,
+        "accuracy_pct": 80.95238095238095
+      }
+    },
+    {
+      "pass": 1,
+      "parameter": "kdj_age",
+      "before": [
+        0,
+        6
+      ],
+      "after": [
+        0,
+        6
+      ],
+      "candidate_rows_after_other_rules": 33,
+      "candidate_intervals": 44,
+      "confirmed_result": {
+        "settings": {
+          "szse_quant_filter_rsi_range": [
+            46.2,
+            56.5
+          ],
+          "szse_quant_filter_turnover_range": [
+            5.2,
+            7.9
+          ],
+          "szse_quant_filter_volume_ratio_range": [
+            1.4,
+            2.7
+          ],
+          "szse_quant_filter_pct_change_range": [
+            3.2,
+            10.1
+          ],
+          "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+            0,
+            6
+          ],
+          "szse_quant_filter_macd_dea_minus_dif_range": [
+            0.1,
+            0.2
+          ]
+        },
+        "total_return_pct": 148.70858859000887,
+        "prediction_days": 21,
+        "correct_days": 17,
+        "accuracy_pct": 80.95238095238095
+      }
+    }
+  ],
+  "data_window": {
+    "return_workbook": "D:\\IndicatorScreening_Asheres\\strategy_backtest\\outputs\\input_data\\深市主板每日涨跌幅_滚动更新.xlsx",
+    "first_signal_date": "2026-06-22",
+    "last_signal_date": "2026-07-31",
+    "last_verification_date": "2026-08-03",
+    "lookback_signal_days": 30
+  },
+  "starter_source": "当前日期之前最近一次有效优化结果；没有时使用程序默认值",
+  "initial_settings": {
+    "szse_quant_filter_rsi_range": [
+      46.2,
+      56.5
+    ],
+    "szse_quant_filter_turnover_range": [
+      5.2,
+      7.9
+    ],
+    "szse_quant_filter_volume_ratio_range": [
+      1.4,
+      2.7
+    ],
+    "szse_quant_filter_pct_change_range": [
+      3.2,
+      10.1
+    ],
+    "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+      0,
+      6
+    ],
+    "szse_quant_filter_macd_dea_minus_dif_range": [
+      0.1,
+      0.2
+    ]
+  },
+  "screening_settings": {
+    "szse_quant_filter_above_ma5": true,
+    "szse_quant_filter_above_ma20": true,
+    "szse_quant_filter_ma5_above_ma20": false,
+    "szse_quant_filter_platform_breakout_20d": false,
+    "szse_quant_filter_ma5_rising": false,
+    "szse_quant_filter_close_near_daily_high": false,
+    "szse_quant_filter_rsi_in_range": true,
+    "szse_quant_filter_rsi_range": [
+      46.2,
+      56.5
+    ],
+    "szse_quant_filter_macd_bullish": true,
+    "szse_quant_filter_macd_golden_cross": false,
+    "szse_quant_filter_macd_golden_cross_lookback_days": 3,
+    "szse_quant_filter_macd_bearish": false,
+    "szse_quant_filter_macd_dead_cross": false,
+    "szse_quant_filter_macd_dea_minus_dif_high": false,
+    "szse_quant_filter_macd_dea_minus_dif_range": [
+      0.1,
+      0.2
+    ],
+    "szse_quant_filter_kdj_healthy_golden_cross_3d": true,
+    "szse_quant_filter_kdj_healthy_golden_cross_age_range": [
+      0,
+      6
+    ],
+    "szse_quant_filter_volume_breakout": true,
+    "szse_quant_filter_volume_ratio_range": [
+      1.4,
+      2.7
+    ],
+    "szse_quant_filter_amount_at_least_100m": true,
+    "szse_quant_filter_turnover_in_range": true,
+    "szse_quant_filter_turnover_range": [
+      5.2,
+      7.9
+    ],
+    "szse_quant_filter_float_market_cap_in_range": false,
+    "szse_quant_filter_float_market_cap_range_yi": [
+      50.0,
+      200.0
+    ],
+    "szse_quant_filter_positive_change": false,
+    "szse_quant_filter_pct_change_in_range": true,
+    "szse_quant_filter_pct_change_range": [
+      3.2,
+      10.1
+    ],
+    "szse_quant_filter_amplitude_high": false,
+    "szse_quant_filter_amplitude_threshold": 3.0,
+    "szse_quant_filter_require_all": true,
+    "szse_quant_risk_bias_high": true,
+    "szse_quant_risk_upper_shadow": false,
+    "szse_quant_risk_resistance_60_day": true,
+    "szse_quant_risk_candlestick_patterns": [
+      "doji_3d",
+      "inverted_t_doji_3d",
+      "hanging_man_3d"
+    ]
+  },
+  "fixed_selected_conditions": {
+    "above_ma5": true,
+    "above_ma20": true,
+    "ma5_above_ma20": false,
+    "rsi_in_range": true,
+    "macd_bullish": true,
+    "macd_golden_cross": false,
+    "macd_bearish": false,
+    "macd_dead_cross": false,
+    "macd_dea_minus_dif_high": false,
+    "kdj_healthy_golden_cross_3d": true,
+    "platform_breakout_20d": false,
+    "ma5_rising": false,
+    "close_near_daily_high": false,
+    "volume_breakout": true,
+    "amount_at_least_100m": true,
+    "turnover_in_range": true,
+    "float_market_cap_in_range": false,
+    "positive_change": false,
+    "pct_change_in_range": true,
+    "amplitude_high": false
+  },
+  "fixed_risk_filters": {
+    "bias_high": true,
+    "upper_shadow": false,
+    "resistance_60_day": true,
+    "doji_3d": true,
+    "inverted_t_doji_3d": true,
+    "hanging_man_3d": true,
+    "long_upper_shadow_bullish_3d": false,
+    "extreme_bullish_3d": false
+  },
+  "minimum_prediction_days": 6,
+  "history_summary": {
+    "股票总数": 1485,
+    "历史成功": 1485,
+    "历史失败": 0,
+    "历史获取失败股票数": 0,
+    "历史预热不足股票数": 5,
+    "历史自动剔除股票数": 5,
+    "历史有效股票数": 1480,
+    "历史缓存命中": 0
+  },
+  "factor_error_count": 62,
+  "factor_row_count": 44269,
+  "stock_pool_rows_before_exclusion": 1493,
+  "stock_pool_rows_used": 1485,
+  "return_failure_stocks_excluded": 8,
+  "backtest_summary": {
+    "最终统计": "17/21，148.71%",
+    "预测正确天数": 17,
+    "预测天数": 21,
+    "失败预测天数": 4,
+    "预测错误天数": 4,
+    "未预测天数": 9,
+    "总天数": 30,
+    "预测正确率（%）": 80.95238095238095,
+    "总收益率（%）": 148.70858859000887,
+    "日历选股日数": 30,
+    "数据不完整天数": 0,
+    "有信号天数": 21,
+    "无信号天数": 9,
+    "次日收益缺失天数": 0,
+    "策略满分": 9.5,
+    "持仓规则": "每个选股日仅买入一只股票：取风险过滤后的评分排名第一名；得分相同依次按量比、收盘日内位置、成交额降序，再按股票代码升序。",
+    "收益规则": "严格下一市场交易日收盘相对选股日收盘的前复权涨跌幅；未预测日按 0% 计入复利。",
+    "预测正确规则": "仅选中股票且存在严格下一交易日收益时形成预测；涨幅大于 0% 记为正确，其余预测记为失败。"
+  }
+}

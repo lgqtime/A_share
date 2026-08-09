@@ -1,6 +1,6 @@
 # 深市主板指标筛选与交易信号
 
-这是一个独立的深市主板技术指标筛选、单股技术分析、严格次日收益回测和每日交易信号工具。项目使用公开行情接口，不需要 AkShare、模型密钥或 `tradingagents-astock` 的其他文件。
+这是一个独立的深市主板技术指标筛选、单股技术分析、严格次日收益回测和每日交易信号工具。日常指标筛选不需要 AkShare、模型密钥或 `tradingagents-astock` 的其他文件；安装跨项目的 01:00/09:00 计划任务时，`A_Share_investment_Agent/.venv` 需要安装 AkShare 以查询 A 股交易日历。
 
 项目只读取行情、生成候选和发送 PushPlus 提醒，绝不连接券商或提交委托；买卖由使用者自行决定。
 
@@ -29,7 +29,8 @@ IndicatorScreening_Asheres/
 |- stock_analysis.py                       # 单股分析计算核心
 |- stock_analysis_charts.py                # 单股分析图表核心
 |- stock_analysis_app.py                   # 单股分析页面
-|- daily_trading_runner.py                 # 唯一后台任务入口
+|- daily_trading_runner.py                 # 原有选股与盘中监控后台入口
+|- scheduled_ashare_workflow.py            # 跨项目凌晨处理和早间筛选推送入口
 |- intraday_trigger_monitor.py             # 次日盘中监控
 |- run_daily_runner.cmd                    # 后台任务命令入口
 |- install_daily_runner_tasks.ps1          # Windows 计划任务安装脚本
@@ -194,22 +195,23 @@ JSON 使用 UTF-8，日期采用 `YYYY-MM-DD`，缺失值写为 `null`；滚动�
 
 ## 每日后台交易信号
 
-`daily_trading_runner.py` 是唯一后台入口。已实现并验证中国法定休市日保护：即使工作日任务取得陈旧行情，也不会将上一交易日的候选或报价写成当天实时结果。
+`daily_trading_runner.py` 负责原有选股和盘中监控。`scheduled_ashare_workflow.py` 负责跨项目的凌晨数据处理和早间 PushPlus 候选汇总；它使用 A 股交易日历，不会仅按工作日猜测法定节假日。
 
 ### 默认计划
 
 | Windows 任务 | 中国时间 | 工作内容 |
 | --- | --- | --- |
-| `SZSE Quant Daily After Close` | 工作日 17:00 | 更新深市主板股票池和历史收益，用最近 30 个实际交易日优化参数，生成预测及不经风险过滤的前 50 名。 |
+| `A-Share Daily Data Preparation` | 工作日 01:00 | 仅在 A 股交易日运行，处理前一实际交易日（周一自动取周五）的选股数据并归档；保留风险过滤，且不要求同时满足全部勾选条件，不发送消息。 |
+| `A-Share Daily PushPlus Summary` | 工作日 09:00 | 仅在 A 股交易日运行，读取同一交易日归档的“风险过滤后得分前10.csv”，仅发送股票代码、股票名称和未满足条件（扣分项）；无候选时发送空结果。 |
 | `SZSE Quant Morning Monitor` | 工作日 09:28 | 读取与预测日期一致的归档前 50 名并监控至 09:45；达到条件即时推送，09:45 固定推送候选池跌幅最大的股票。 |
-
+uv run D:\IndicatorScreening_Asheres\daily_trading_runner.py --project-dir "D:\IndicatorScreening_Asheres\" --mode monitor
 预测阶段会覆盖以下当前文件，同时保留按日期归档版本：
 
 - `strategy_backtest/outputs/rolling_parameter_updates/rolling_parameter_optimization_current.json`
 - `前 50 名（含所属行业）.csv`
 - `每日交易信号.csv`
 
-“前 50 名（含所属行业）”按全部已启用指标的得分排序，不应用风险过滤，也不要求每项指标同时满足，确保用于次日实时检测的候选池稳定提供 50 只。严格“得分最高的前 10 只股票”仍要求全部条件和风险过滤，因此第一名可能为空。单只股票日线或因子获取失败时，会从当天评分、前 50 和实时候选排除，原因写入归档，不会中断整批任务。
+“前 50 名（含所属行业）”按全部已启用指标的得分排序，不应用风险过滤，也不要求每项指标同时满足，确保用于次日实时检测的候选池稳定提供 50 只。凌晨任务另存“风险过滤后得分前10.csv”：它不要求每项勾选条件同时满足，但会剔除命中任一已启用风险项的股票；全部被剔除时文件保留表头且 09:00 推送空结果。单只股票日线或因子获取失败时，会从当天评分、前 50 和实时候选排除，原因写入归档，不会中断整批任务。
 
 盘中规则先比较精确跌幅，跌幅更深优先；相同时再按 `评分排名`、股票代码排序。触发阈值为 `<= -8.5%`，每只首次触发的候选股立即推送但绝不下单。无论是否触发，09:45 都会额外推送当刻跌幅最大的候选；未触发时消息会明确说明。
 
@@ -287,15 +289,15 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\install_daily_runner_tasks.ps1 -Action Show
 ```
 
-默认使用 S4U 后台登录，不保存 Windows 密码；锁屏或注销后仍可运行。收盘任务设置错过时间后尽快启动，早盘任务不会跨日补跑，避免把已错过窗口的旧候选用于下一交易日。两个任务均配置 5 分钟间隔重试、忽略重复实例和最长 6 小时运行时间；收盘任务最多重试 12 次。
+默认使用与既有 `09:28` 监控一致的 Interactive 登录主体，因此任务会在 Windows 用户登录时运行，锁屏不受影响；注销后会等待下次登录。两个新任务均配置 15 分钟间隔重试、忽略重复实例和最长 9 小时运行时间。安装时会精确注销历史的 `A-Share Top 10 AI Analysis` 04:00 任务；`09:28` 监控不会被安装脚本改动。
 
-若只希望登录期间运行：
+若要在注销后继续运行，可在管理员 PowerShell 中使用 S4U：
 
 ```powershell
-.\install_daily_runner_tasks.ps1 -Action Install -OnlyWhenLoggedOn
+.\install_daily_runner_tasks.ps1 -Action Install -RunWhetherLoggedOnOrNot
 ```
 
-若默认 S4U 安装显示“Access is denied”，请以管理员身份运行 PowerShell 重试；也可使用 `-OnlyWhenLoggedOn`。后者不要求管理员权限，锁屏期间仍会运行，但注销 Windows 后会等待下次登录。
+凌晨任务状态保存在 `daily_trading_outputs/scheduled_analysis/YYYY-MM-DD/data_preparation.json`，其中记录风险过滤后候选 CSV 路径和候选数；09:00 只读取该状态文件指定的 CSV，不会读取 AI 分析结果或回退到前 50 名。
 
 卸载任务：
 
@@ -307,7 +309,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 - 股票池、历史收益、CSV 和参数文件均使用唯一临时文件后原子替换，异常中断不会留下半写入的当前文件，也不会因旧临时文件占用阻塞下次运行。
 - 每日候选、因子、收益、参数、信号和日志均归档到 `daily_trading_outputs/archive/YYYY-MM-DD/`。
-- 若 17:00 收盘数据尚未确认，任务不会覆盖候选，并将以失败状态交给计划任务每 5 分钟重试。
+- 若前一实际交易日的收盘数据尚未确认，01:00 数据准备任务不会写入完成状态，并由计划任务每 15 分钟重试。
 - 少量日线因子失败时，任务仍以其余有效股票排名；全体因子不可用、数据日期不匹配或有效股票不足以形成前 50 时才停止并保留旧候选。
 - 盘中只读取与 `每日交易信号.csv` 中预测日期匹配的归档候选。实时行情必须带有当日 09:28 后、且距当前轮询不超过 90 秒的时间戳；09:45 固定报告只接受 09:45 分钟的完整候选池行情。节假日或陈旧报价不会触发，也不会写成“无信号”；待监控信号会保留到下一实际开市日。
 - 若程序在 09:45 行情可确认时限后启动，会写入“监控窗口错过”，不会伪造盘中结果。网络异常时由计划任务重试；运行锁具备进程所有权，旧进程不会删除新进程的锁。

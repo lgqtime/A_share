@@ -2493,7 +2493,7 @@ def score_and_select(
     )
     eligible["_排序成交额"] = pd.to_numeric(eligible.get("当日成交额"), errors="coerce")
     eligible = eligible.sort_values(
-        ["得分", "_排序量比", "_排序收盘位置", "_排序成交额", "股票代码"],
+        ["得分", "_排序成交额", "_排序量比", "_排序收盘位置", "股票代码"],
         ascending=[False, False, False, False, True],
         kind="stable",
         na_position="last",
