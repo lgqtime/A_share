@@ -43,11 +43,24 @@ CALENDAR_LOOKBACK_DAYS = 31
 COLLECT_TIMEOUT_SECONDS = 6 * 60 * 60
 ANALYSIS_TIMEOUT_SECONDS = 8 * 60 * 60
 PUSHPLUS_ENDPOINT = "https://www.pushplus.plus/send"
-PUSHPLUS_MAX_ATTEMPTS = 3
-PUSHPLUS_RETRY_DELAY_SECONDS = 5.0
+PUSHPLUS_RETRY_DELAYS_SECONDS = (10.0, 20.0, 40.0, 60.0, 90.0)
+PUSHPLUS_MAX_ATTEMPTS = len(PUSHPLUS_RETRY_DELAYS_SECONDS) + 1
 TOP_FIFTY_FILE_NAME = "前 50 名（含所属行业）.csv"
 RISK_FILTERED_TOP_TEN_FILE_NAME = "风险过滤后得分前10.csv"
 STATE_FILE_NAME = "运行状态.json"
+AI_OUTPUT_DIRECTORY_NAME = "ai_agent_outputs"
+AI_RUN_MANIFEST_FILE_NAME = "run_manifest.json"
+AI_TOP_TEN_FILE_NAME = "top10_recommendations.csv"
+AI_TOP_TEN_COLUMNS = (
+    "股票代码",
+    "股票名称",
+    "主概念",
+    "个股得分",
+    "模型结论",
+    "风险等级",
+    "推荐等级",
+    "关键风险",
+)
 
 
 class ScheduledWorkflowError(RuntimeError):
@@ -763,6 +776,173 @@ def build_screening_pushplus_html(
     )
 
 
+def _manifest_run_date(manifest: Mapping[str, Any]) -> Optional[date]:
+    value = manifest.get("run_at")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def read_latest_completed_ai_top_ten(
+    indicator_project: Path,
+    scheduled_day: date,
+) -> Optional[list[dict[str, str]]]:
+    """Read the newest valid AI batch created on the scheduled day only."""
+
+    day_dir = indicator_project / AI_OUTPUT_DIRECTORY_NAME / scheduled_day.strftime("%Y%m%d")
+    if not day_dir.is_dir():
+        return None
+
+    completed_runs: list[tuple[str, str, list[dict[str, str]]]] = []
+    for run_dir in day_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        manifest = read_json(run_dir / AI_RUN_MANIFEST_FILE_NAME)
+        output_files = manifest.get("output_files")
+        if (
+            _manifest_run_date(manifest) != scheduled_day
+            or not isinstance(output_files, list)
+            or AI_TOP_TEN_FILE_NAME not in {str(item) for item in output_files}
+        ):
+            continue
+
+        top_ten_path = run_dir / AI_TOP_TEN_FILE_NAME
+        if not top_ten_path.is_file():
+            continue
+        try:
+            frame = _read_csv(top_ten_path, allow_empty=True)
+        except ScheduledWorkflowError:
+            continue
+        if any(column not in frame.columns for column in AI_TOP_TEN_COLUMNS):
+            continue
+
+        candidates: list[dict[str, str]] = []
+        valid = True
+        for _, row in frame.head(MAX_STOCKS).iterrows():
+            ticker = _normalise_code(row.get("股票代码", ""))
+            if len(ticker) != 6 or not ticker.isdigit():
+                valid = False
+                break
+            candidates.append(
+                {
+                    "ticker": ticker,
+                    "name": _candidate_text(row.get("股票名称"), "-"),
+                    "concept": _candidate_text(row.get("主概念"), "-"),
+                    "score": _candidate_text(row.get("个股得分"), "-"),
+                    "conclusion": _candidate_text(row.get("模型结论"), "-"),
+                    "risk_level": _candidate_text(row.get("风险等级"), "-"),
+                    "recommendation": _candidate_text(row.get("推荐等级"), "-"),
+                    "key_risk": _candidate_text(row.get("关键风险"), "-"),
+                }
+            )
+        if valid:
+            completed_runs.append((str(manifest["run_at"]), run_dir.name, candidates))
+
+    if not completed_runs:
+        return None
+    return max(completed_runs, key=lambda item: (item[0], item[1]))[2]
+
+
+def intersect_ai_and_risk_filtered_candidates(
+    candidates: list[Mapping[str, str]],
+    ai_candidates: list[Mapping[str, str]],
+) -> list[dict[str, str]]:
+    """Return AI-ranked stocks that also appear in the risk-filtered daily list."""
+
+    daily_candidates = {
+        _normalise_code(candidate.get("ticker", "")): candidate
+        for candidate in candidates
+    }
+    matches: list[dict[str, str]] = []
+    for ai_candidate in ai_candidates:
+        ticker = _normalise_code(ai_candidate.get("ticker", ""))
+        daily_candidate = daily_candidates.get(ticker)
+        if daily_candidate is None:
+            continue
+        matches.append(
+            {
+                **{str(key): _candidate_text(value, "-") for key, value in ai_candidate.items()},
+                "ticker": ticker,
+                "deduction": _candidate_text(daily_candidate.get("deduction"), "无"),
+            }
+        )
+    return matches
+
+
+def build_combined_pushplus_html(
+    trade_date: str,
+    scheduled_date: str,
+    candidates: list[Mapping[str, str]],
+    ai_candidates: Optional[list[Mapping[str, str]]],
+) -> str:
+    content = [build_screening_pushplus_html(trade_date, candidates)]
+    escaped_scheduled_date = html.escape(scheduled_date)
+    content.append(f"<h3>当天 AI 分析前十名：{escaped_scheduled_date}</h3>")
+    if ai_candidates is None:
+        content.append("<p>当天 AI 分析结果尚不可用，未读取历史分析结果。</p>")
+        return "".join(content)
+    if not ai_candidates:
+        content.append("<p>当天 AI 分析未产生可推送结果。</p>")
+        return "".join(content)
+
+    rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(str(candidate.get('ticker', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('name', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('concept', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('score', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('conclusion', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('risk_level', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('recommendation', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('key_risk', '-')))}</td>"
+        "</tr>"
+        for candidate in ai_candidates
+    )
+    content.extend(
+        [
+            "<table border='1' cellspacing='0' cellpadding='5'>",
+            "<tr><th>股票代码</th><th>股票名称</th><th>主概念</th><th>个股得分</th>"
+            "<th>模型结论</th><th>风险等级</th><th>推荐等级</th><th>关键风险</th></tr>",
+            rows,
+            "</table>",
+        ]
+    )
+    matched_candidates = intersect_ai_and_risk_filtered_candidates(candidates, ai_candidates)
+    content.append(f"<h3>当天 AI 与风险过滤候选交集：{escaped_scheduled_date}</h3>")
+    if not matched_candidates:
+        content.append("<p>当天两组前十无重合股票。</p>")
+        return "".join(content)
+
+    matched_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(str(candidate.get('ticker', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('name', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('concept', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('score', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('conclusion', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('risk_level', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('recommendation', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('key_risk', '-')))}</td>"
+        f"<td>{html.escape(str(candidate.get('deduction', '无')))}</td>"
+        "</tr>"
+        for candidate in matched_candidates
+    )
+    content.extend(
+        [
+            "<table border='1' cellspacing='0' cellpadding='5'>",
+            "<tr><th>股票代码</th><th>股票名称</th><th>主概念</th><th>个股得分</th>"
+            "<th>模型结论</th><th>风险等级</th><th>推荐等级</th><th>关键风险</th>"
+            "<th>未满足条件（扣分项）</th></tr>",
+            matched_rows,
+            "</table>",
+        ]
+    )
+    return "".join(content)
+
+
 def send_pushplus(
     *,
     env_file: Path,
@@ -814,13 +994,14 @@ def send_pushplus_with_retry(
                     PUSHPLUS_MAX_ATTEMPTS,
                 )
                 raise
+            delay_seconds = PUSHPLUS_RETRY_DELAYS_SECONDS[attempt - 1]
             logger.info(
                 "Retrying PushPlus summary in %.1f seconds (attempt %d/%d).",
-                PUSHPLUS_RETRY_DELAY_SECONDS,
+                delay_seconds,
                 attempt + 1,
                 PUSHPLUS_MAX_ATTEMPTS,
             )
-            time.sleep(PUSHPLUS_RETRY_DELAY_SECONDS)
+            time.sleep(delay_seconds)
 
 
 def run_send(
@@ -886,9 +1067,88 @@ def run_send(
     return 0
 
 
+def run_send_combined(
+    *,
+    indicator_project: Path,
+    agent_project: Path,
+    scheduled_day: date,
+    dry_run: bool,
+    force: bool,
+    logger: logging.Logger,
+) -> int:
+    del agent_project  # Kept in the public signature for uniform task actions.
+    target_day = scheduled_target_day(indicator_project, scheduled_day, logger)
+    if target_day is None:
+        return 0
+
+    output_dir = day_output_dir(indicator_project, target_day)
+    preparation = read_json(output_dir / "data_preparation.json")
+    if (
+        preparation.get("status") != "completed"
+        or preparation.get("trade_date") != target_day.isoformat()
+    ):
+        raise ScheduledWorkflowError(f"缺少 {target_day.isoformat()} 的凌晨数据结果，不能发送。")
+    candidate_csv_value = str(preparation.get("risk_filtered_top_ten_csv", "")).strip()
+    if not candidate_csv_value:
+        raise ScheduledWorkflowError(
+            f"凌晨数据结果缺少 {target_day.isoformat()} 的风险过滤候选文件路径，不能发送。"
+        )
+    candidate_csv = _require_file(Path(candidate_csv_value), "风险过滤后前 10 候选 CSV")
+    candidates = read_risk_filtered_candidates(candidate_csv)
+    ai_candidates = read_latest_completed_ai_top_ten(indicator_project, scheduled_day)
+
+    title = f"A 股早间候选与 AI 分析 {scheduled_day.isoformat()}"
+    content = build_combined_pushplus_html(
+        target_day.isoformat(),
+        scheduled_day.isoformat(),
+        candidates,
+        ai_candidates,
+    )
+    message_path = output_dir / "pushplus_combined_message.html"
+    message_path.write_text(content, encoding="utf-8")
+    send_state_path = output_dir / "pushplus_combined_send_state.json"
+    prior_state = read_json(send_state_path)
+    if prior_state.get("status") == "sent" and not force:
+        logger.info("Combined PushPlus summary was already sent for %s.", scheduled_day.isoformat())
+        return 0
+    if dry_run:
+        logger.info(
+            "Dry run: generated combined PushPlus payload for %s at %s.",
+            scheduled_day.isoformat(),
+            message_path,
+        )
+        return 0
+
+    send_pushplus_with_retry(
+        env_file=indicator_project / ".env",
+        title=title,
+        content=content,
+        logger=logger,
+    )
+    write_json(
+        send_state_path,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "scheduled_date": scheduled_day.isoformat(),
+            "trade_date": target_day.isoformat(),
+            "status": "sent",
+            "sent_at": china_now().isoformat(),
+            "title": title,
+            "message_file": str(message_path),
+            "ai_result_available": ai_candidates is not None,
+        },
+    )
+    logger.info("Combined PushPlus summary sent for %s.", scheduled_day.isoformat())
+    return 0
+
+
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", required=True, choices=("collect", "analyze", "send"))
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=("collect", "analyze", "send", "send-combined"),
+    )
     parser.add_argument("--indicator-project-dir", type=Path, default=SCRIPT_DIR)
     parser.add_argument(
         "--agent-project-dir",
@@ -901,7 +1161,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Manual replay only: the scheduled trading day; defaults to today in China.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Validate inputs without collecting, analyzing, or sending.")
-    parser.add_argument("--force", action="store_true", help="Allow a previously sent 09:00 summary to be sent again.")
+    parser.add_argument("--force", action="store_true", help="Allow a previously sent summary to be sent again.")
     return parser.parse_args(argv)
 
 
@@ -930,6 +1190,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             agent_project=agent_project,
             scheduled_day=scheduled_day,
             dry_run=bool(args.dry_run),
+            logger=logger,
+        )
+    if args.mode == "send-combined":
+        return run_send_combined(
+            indicator_project=indicator_project,
+            agent_project=agent_project,
+            scheduled_day=scheduled_day,
+            dry_run=bool(args.dry_run),
+            force=bool(args.force),
             logger=logger,
         )
     return run_send(

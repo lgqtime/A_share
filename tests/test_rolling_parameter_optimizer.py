@@ -7,6 +7,7 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -24,6 +25,46 @@ DEFAULT_SETTINGS = {
     "szse_quant_filter_macd_dea_minus_dif_range": (0.1, 0.2),
     "szse_quant_filter_kdj_healthy_golden_cross_age_range": (1, 3),
 }
+
+
+class ReturnsWorkbookSelectionTests(unittest.TestCase):
+    def test_prefers_completed_rolling_workbook_over_dated_history(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            project_dir = Path(temporary_directory)
+            module_dir = project_dir / "strategy_backtest"
+            input_dir = module_dir / "outputs" / "input_data"
+            input_dir.mkdir(parents=True)
+            dated_history = input_dir / "深市主板每日涨跌幅_2025-10-29_2026-07-27.xlsx"
+            rolling_workbook = input_dir / "深市主板每日涨跌幅_滚动更新.xlsx"
+            dated_history.touch()
+            rolling_workbook.touch()
+
+            with (
+                patch.object(optimizer, "PROJECT_DIR", project_dir),
+                patch.object(optimizer, "MODULE_DIR", module_dir),
+            ):
+                selected = optimizer._find_latest_returns_workbook()
+
+        self.assertEqual(selected, rolling_workbook.resolve())
+
+    def test_falls_back_to_the_latest_dated_history_without_rolling_workbook(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            project_dir = Path(temporary_directory)
+            module_dir = project_dir / "strategy_backtest"
+            input_dir = module_dir / "outputs" / "input_data"
+            input_dir.mkdir(parents=True)
+            older_history = input_dir / "深市主板每日涨跌幅_2025-10-29_2026-07-27.xlsx"
+            latest_history = input_dir / "深市主板每日涨跌幅_2025-10-29_2026-08-07.xlsx"
+            older_history.touch()
+            latest_history.touch()
+
+            with (
+                patch.object(optimizer, "PROJECT_DIR", project_dir),
+                patch.object(optimizer, "MODULE_DIR", module_dir),
+            ):
+                selected = optimizer._find_latest_returns_workbook()
+
+        self.assertEqual(selected, latest_history.resolve())
 
 
 def _settings_with_rsi(lower: float, upper: float) -> dict[str, tuple[float, float]]:
@@ -169,9 +210,9 @@ assert resolved_path == root_path, (
             msg=f"subprocess failed:\\nstdout:\\n{completed.stdout}\\nstderr:\\n{completed.stderr}",
         )
 
-    def test_default_lookback_is_thirty_trading_days(self) -> None:
-        self.assertEqual(optimizer.DEFAULT_LOOKBACK_DAYS, 30)
-        self.assertEqual(optimizer.parse_args([]).lookback_days, 30)
+    def test_default_lookback_is_fourteen_trading_days(self) -> None:
+        self.assertEqual(optimizer.DEFAULT_LOOKBACK_DAYS, 14)
+        self.assertEqual(optimizer.parse_args([]).lookback_days, 14)
 
     def test_selects_only_the_requested_count_of_recent_verifiable_signal_days(self) -> None:
         first = date(2026, 7, 20)

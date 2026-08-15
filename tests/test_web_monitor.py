@@ -1,4 +1,8 @@
 import unittest
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 from web_monitor import (
     QUOTE_UPDATE_SECONDS,
@@ -12,6 +16,28 @@ from web_monitor import (
 
 
 class QuoteParsingTests(unittest.TestCase):
+    def test_import_does_not_load_project_dotenv_into_process(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        clean_env = os.environ.copy()
+        clean_env.pop("TAVILY_HUB_API_KEY1", None)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os; import web_monitor; "
+                    "print('present' if os.getenv('TAVILY_HUB_API_KEY1') else 'absent')"
+                ),
+            ],
+            cwd=project_root,
+            env=clean_env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "absent")
+
     def test_filter_quotes_for_stocks_discards_removed_candidates(self) -> None:
         quotes = {"000001": {"name": "First"}, "000002": {"name": "Second"}}
 

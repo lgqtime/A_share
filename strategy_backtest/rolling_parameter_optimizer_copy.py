@@ -39,7 +39,7 @@ DEFAULT_CONFIRM_TOP = 3
 DEFAULT_BATCH_SIZE = 2_048
 FACTOR_WORKERS = max(1, min(core.MAX_FACTOR_WORKERS, 8))
 REPORT_PREFIX = "rolling_parameter_optimization_"
-CURRENT_PARAMETER_FILENAME = "rolling_parameter_optimization_current.json"
+CURRENT_PARAMETER_FILENAME = "rolling_parameter_optimization_current_copy.json"
 BACKTEST_PREFIX = "rolling_parameter_backtest_"
 BACKTEST_REPORT_TYPE = "rolling_parameter_backtest"
 ROLLING_RETURNS_WORKBOOK_NAME = "深市主板每日涨跌幅_滚动更新.xlsx"
@@ -1256,7 +1256,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--lookback-days",
         type=int,
         default=DEFAULT_LOOKBACK_DAYS,
-        help="向前使用的实际可验证选股日数量，默认14。",
+        help="向前使用的实际可验证选股日数量，默认30。",
     )
     parser.add_argument(
         "--minimum-prediction-days",

@@ -17,11 +17,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
 TOKEN = os.getenv("zhituapi")
-if not TOKEN:
-    raise ValueError("请在 .env 中设置 zhituapi")
-TOP = 20
+TOP = 30
 CSV_PATH = BASE_DIR / "前 50 名（含所属行业）.csv"
 df = pd.read_csv(CSV_PATH, encoding="utf-8-sig")
 df_top20 = df.head(TOP).copy()
@@ -153,10 +150,21 @@ def parse_quote_payload(data, stock):
     }
 
 
+def load_runtime_token():
+    global TOKEN
+    if TOKEN:
+        return TOKEN
+    load_dotenv(BASE_DIR / ".env")
+    TOKEN = os.getenv("zhituapi")
+    if not TOKEN:
+        raise ValueError("请在 .env 中设置 zhituapi")
+    return TOKEN
+
+
 def fetch_quote(stock):
     response = requests.get(
         build_quote_url(stock["code"]),
-        params={"token": TOKEN},
+        params={"token": load_runtime_token()},
         timeout=5,
     )
     response.raise_for_status()
@@ -236,6 +244,7 @@ def api_quotes():
 
 
 def start_background():
+    load_runtime_token()
     thread = threading.Thread(target=background_updater, daemon=True)
     thread.start()
     logger.info("后台行情更新线程已启动，刷新间隔 %.0f 秒", QUOTE_UPDATE_SECONDS)

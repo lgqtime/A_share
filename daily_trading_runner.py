@@ -32,6 +32,7 @@ import fetch_szse_data
 import fetch_zhitu_stock_pool
 import intraday_trigger_monitor as intraday
 import szse_quant_app as screening
+from strategy_backtest import rolling_parameter_ensemble as ensemble
 from strategy_backtest import rolling_parameter_optimizer as optimizer
 
 
@@ -39,9 +40,9 @@ PROJECT_DIR = Path(__file__).resolve().parent
 CHINA_TIMEZONE = ZoneInfo("Asia/Shanghai")
 AFTER_CLOSE_READY_TIME = time(16, 30)
 MONITOR_START_TIME = time(9, 28)
-MONITOR_END_TIME = time(9, 45)
-FINAL_QUOTE_EARLIEST_TIME = time(9, 44)
-FINAL_MAX_DECLINE_STATUS = "09:45候选池最大跌幅"
+MONITOR_END_TIME = time(10, 5)
+FINAL_QUOTE_EARLIEST_TIME = time(10, 4)
+FINAL_MAX_DECLINE_STATUS = "10:05候选池最大跌幅"
 MONITOR_FINAL_NOTIFICATION_KEY = "monitor-final"
 MONITOR_TRIGGER_NOTIFICATION_PREFIX = "monitor-trigger-"
 DEFAULT_MONITOR_INTERVAL_SECONDS = 60
@@ -1227,7 +1228,7 @@ def _write_prediction_artifacts(
         "实时触发时间": "",
         "行情更新时间": "",
         "更新时间": china_now().isoformat(),
-        "备注": "等待下一交易日09:28-09:45实时检测。",
+        "备注": "等待下一交易日09:28-10:05实时检测。",
     }
     atomic_write_csv(_single_row_frame(signal, SIGNAL_COLUMNS), paths.combined_signal)
     atomic_write_csv(_single_row_frame(signal, SIGNAL_COLUMNS), archive / "每日交易信号.csv")
@@ -1337,7 +1338,7 @@ def _send_notification_once(
 
 def _monitor_notification_title(record: Mapping[str, object], monitor_day: date) -> str:
     if str(record.get("实时状态", "")) == FINAL_MAX_DECLINE_STATUS:
-        return f"深市主板09:45可用行情最大跌幅 {monitor_day.isoformat()}"
+        return f"深市主板10:05可用行情最大跌幅 {monitor_day.isoformat()}"
     return f"深市主板实时检测 {monitor_day.isoformat()}"
 
 
@@ -1449,7 +1450,7 @@ def run_after_close(
         if paths.current_parameter_file.is_file()
         else None
     )
-    optimizer_exit_code = optimizer.main(
+    optimizer_exit_code = ensemble.main(
         [
             "--returns-workbook",
             str(paths.returns_workbook),
@@ -1459,8 +1460,6 @@ def run_after_close(
             str(paths.optimizer_output_dir),
             "--as-of-date",
             target_day.isoformat(),
-            "--lookback-days",
-            "30",
         ]
     )
     if optimizer_exit_code != 0 or not paths.current_parameter_file.is_file():
@@ -1813,7 +1812,7 @@ def _validate_monitor_request_budget(
         (MONITOR_END_TIME.hour * 60 + MONITOR_END_TIME.minute) * 60
         - (MONITOR_START_TIME.hour * 60 + MONITOR_START_TIME.minute) * 60
     )
-    # One extra complete snapshot is required for the fixed 09:45 report.
+    # One extra complete snapshot is required for the fixed 10:05 report.
     snapshots = (monitor_window_seconds + interval_seconds - 1) // interval_seconds + 1
     requests_per_snapshot = (
         (candidate_count + intraday.MAX_BATCH_CODES - 1) // intraday.MAX_BATCH_CODES
@@ -2107,7 +2106,7 @@ def run_monitor(
             prediction,
             monitor_day,
             status="监控窗口错过",
-            note="程序启动时已超过09:45行情可确认时限，未伪造盘中触发结果。",
+            note="程序启动时已超过10:05行情可确认时限，未伪造盘中触发结果。",
         )
         _commit_final_monitor_record(paths, prediction_day, monitor_day, record)
         _send_notification_once(
@@ -2221,7 +2220,7 @@ def run_monitor(
             return None
         if final_report and observed_at > final_snapshot_deadline:
             logger.warning(
-                "Discarded 09:45 snapshot completed after the final deadline: %s",
+                "Discarded 10:05 snapshot completed after the final deadline: %s",
                 observed_at,
             )
             return None
@@ -2235,7 +2234,7 @@ def run_monitor(
             observed_at=observed_at,
             final_report=final_report,
         )
-        label = "09:45" if final_report else "monitoring"
+        label = "10:5" if final_report else "monitoring"
         if stale_codes:
             logger.warning(
                 "Discarded stale %s quote snapshot for %s codes; examples: %s",
@@ -2308,7 +2307,7 @@ def run_monitor(
     if final_snapshot is not None and final_snapshot_observed_at is not None:
         largest_decline = intraday.select_largest_decline(candidates, final_snapshot)
         if largest_decline is None:
-            raise PipelineError("09:45可用行情为空，无法确定最大跌幅股票。")
+            raise PipelineError("10:5可用行情为空，无法确定最大跌幅股票。")
         ignored_quote_count = len(candidates) - len(final_snapshot)
         coverage_note = (
             f"本次可用行情 {len(final_snapshot)}/{len(candidates)}，已忽略 "
@@ -2318,11 +2317,11 @@ def run_monitor(
         )
         if triggered_codes:
             note = (
-                f"09:45定时推送：本时段已有 {len(triggered_codes)} 只候选股触发条件；"
-                f"{coverage_note}此为09:45可用行情中跌幅最大股票。"
+                f"10:5定时推送：本时段已有 {len(triggered_codes)} 只候选股触发条件；"
+                f"{coverage_note}此为10:5可用行情中跌幅最大股票。"
             )
         else:
-            note = f"本时段无触发股票；{coverage_note}按规则推送09:45可用行情中跌幅最大股票。"
+            note = f"本时段无触发股票；{coverage_note}按规则推送10:5可用行情中跌幅最大股票。"
         record = _realtime_record(
             prediction,
             monitor_day,
@@ -2341,7 +2340,7 @@ def run_monitor(
             _realtime_message(record),
             force=force,
         )
-        logger.info("Realtime monitoring completed with the 09:45 maximum-decline report.")
+        logger.info("Realtime monitoring completed with the 10:5 maximum-decline report.")
         return 0
 
     if successful_snapshots and not current_day_quote_seen:
@@ -2359,7 +2358,7 @@ def run_monitor(
         logger.info("Realtime monitor skipped for %s: %s", monitor_day, note)
         return 0
     status = "行情异常"
-    note = "未取得可确认的当日09:45附近可用行情，未推送最大跌幅。"
+    note = "未取得可确认的当日10:5附近可用行情，未推送最大跌幅。"
     record = _realtime_record(prediction, monitor_day, status=status, note=note)
     _commit_final_monitor_record(paths, prediction_day, monitor_day, record)
     _send_notification_once(

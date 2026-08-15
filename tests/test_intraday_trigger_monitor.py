@@ -1,3 +1,4 @@
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,6 +12,7 @@ from intraday_trigger_monitor import (
     API_URL,
     Candidate,
     Quote,
+    END_TIME,
     ZhituApiClient,
     collect_available_snapshot,
     collect_complete_snapshot,
@@ -19,6 +21,11 @@ from intraday_trigger_monitor import (
     select_trigger,
     select_triggers,
 )
+
+
+class MonitoringWindowTests(unittest.TestCase):
+    def test_monitoring_window_ends_at_1005(self) -> None:
+        self.assertEqual(END_TIME, time(10, 5))
 
 
 def make_quote(code: str, last_price: str, previous_close: str) -> Quote:

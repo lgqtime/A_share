@@ -298,7 +298,9 @@ class DailyTradingRunnerTests(unittest.TestCase):
                 patch.object(runner.screening, "load_mainboard_companies", return_value=pd.DataFrame()),
                 patch.object(runner, "update_incremental_return_history", return_value=return_update),
                 patch.object(runner, "_missing_required_return_codes", return_value=set()),
-                patch.object(runner.optimizer, "main", side_effect=write_new_parameters),
+                patch.object(
+                    runner.ensemble, "main", side_effect=write_new_parameters
+                ) as optimize,
                 patch.object(
                     runner.screening,
                     "collect_factor_frame",
@@ -315,6 +317,20 @@ class DailyTradingRunnerTests(unittest.TestCase):
                     )
 
             self.assertEqual(paths.current_parameter_file.read_bytes(), b"previous-parameters")
+            ensemble_arguments = optimize.call_args.args[0]
+            self.assertEqual(
+                ensemble_arguments[
+                    ensemble_arguments.index("--as-of-date") + 1
+                ],
+                target_day.isoformat(),
+            )
+            self.assertEqual(
+                ensemble_arguments[
+                    ensemble_arguments.index("--returns-workbook") + 1
+                ],
+                str(paths.returns_workbook),
+            )
+            self.assertNotIn("--lookback-days", ensemble_arguments)
 
     def test_after_close_excludes_unavailable_factor_stocks_and_completes(self) -> None:
         target_day = date(2026, 7, 28)
@@ -385,7 +401,7 @@ class DailyTradingRunnerTests(unittest.TestCase):
                 patch.object(runner.screening, "load_mainboard_companies", return_value=companies),
                 patch.object(runner, "update_incremental_return_history", return_value=return_update),
                 patch.object(runner, "_missing_required_return_codes", return_value=set()),
-                patch.object(runner.optimizer, "main", side_effect=write_new_parameters),
+                patch.object(runner.ensemble, "main", side_effect=write_new_parameters),
                 patch.object(
                     runner.screening,
                     "collect_factor_frame",
@@ -788,14 +804,14 @@ class DailyTradingRunnerTests(unittest.TestCase):
         future_final_snapshot = {
             "000005": runner.intraday.Quote(
                 "000005", runner.intraday.Decimal("9.15"), runner.intraday.Decimal("10"),
-                "2026-07-28 09:45:06",
+                "2026-07-28 10:05:06",
             )
         }
         self.assertEqual(
             runner._stale_quote_codes(
                 future_final_snapshot,
                 date(2026, 7, 28),
-                observed_at=datetime(2026, 7, 28, 9, 45),
+                observed_at=datetime(2026, 7, 28, 10, 5),
                 final_report=True,
             ),
             ["000005"],
@@ -911,7 +927,7 @@ class DailyTradingRunnerTests(unittest.TestCase):
         snapshot_completed_at = datetime(
             2026, 7, 28, 9, 31, 31, tzinfo=runner.CHINA_TIMEZONE
         )
-        window_end = datetime(2026, 7, 28, 9, 45, tzinfo=runner.CHINA_TIMEZONE)
+        window_end = datetime(2026, 7, 28, 10, 5, tzinfo=runner.CHINA_TIMEZONE)
 
         with TemporaryDirectory() as temporary_directory:
             paths = runner.PipelinePaths(Path(temporary_directory))
@@ -977,8 +993,8 @@ class DailyTradingRunnerTests(unittest.TestCase):
         )
         select_triggers.assert_not_called()
 
-    def test_monitor_accepts_a_fresh_pre_0945_quote_for_the_final_report(self) -> None:
-        """The fixed report accepts a fresh quote from the 09:45-adjacent window."""
+    def test_monitor_accepts_a_fresh_pre_1005_quote_for_the_final_report(self) -> None:
+        """The fixed report accepts a fresh quote from the 10:05-adjacent window."""
         monitor_day = date(2026, 7, 28)
         prediction_day = date(2026, 7, 27)
         candidate = runner.intraday.Candidate("000001", "Test", 1)
@@ -986,12 +1002,12 @@ class DailyTradingRunnerTests(unittest.TestCase):
             "000001",
             runner.intraday.Decimal("9"),
             runner.intraday.Decimal("10"),
-            "2026-07-28 09:44:59",
+            "2026-07-28 10:04:59",
         )
         snapshot = {candidate.code: quote}
-        before_snapshot = datetime(2026, 7, 28, 9, 44, 59, tzinfo=runner.CHINA_TIMEZONE)
+        before_snapshot = datetime(2026, 7, 28, 10, 4, 59, tzinfo=runner.CHINA_TIMEZONE)
         snapshot_completed_at = datetime(
-            2026, 7, 28, 9, 45, tzinfo=runner.CHINA_TIMEZONE
+            2026, 7, 28, 10, 5, tzinfo=runner.CHINA_TIMEZONE
         )
 
         with TemporaryDirectory() as temporary_directory:
@@ -1051,14 +1067,14 @@ class DailyTradingRunnerTests(unittest.TestCase):
         partial_snapshot = {
             "000002": runner.intraday.Quote(
                 "000002", runner.intraday.Decimal("9.70"), runner.intraday.Decimal("10"),
-                "2026-07-28 09:44:30",
+                "2026-07-28 10:04:30",
             ),
             "000001": runner.intraday.Quote(
                 "000001", runner.intraday.Decimal("9.70"), runner.intraday.Decimal("10"),
-                "2026-07-28 09:45:00",
+                "2026-07-28 10:05:00",
             ),
         }
-        final_observed_at = datetime(2026, 7, 28, 9, 45, tzinfo=runner.CHINA_TIMEZONE)
+        final_observed_at = datetime(2026, 7, 28, 10, 5, tzinfo=runner.CHINA_TIMEZONE)
 
         with TemporaryDirectory() as temporary_directory:
             paths = runner.PipelinePaths(Path(temporary_directory))
@@ -1124,10 +1140,10 @@ class DailyTradingRunnerTests(unittest.TestCase):
                 candidate.code,
                 runner.intraday.Decimal("9.70"),
                 runner.intraday.Decimal("10"),
-                "2026-07-28 09:45:00",
+                "2026-07-28 10:05:00",
             )
         }
-        started_at = datetime(2026, 7, 28, 9, 45, tzinfo=runner.CHINA_TIMEZONE)
+        started_at = datetime(2026, 7, 28, 10, 5, tzinfo=runner.CHINA_TIMEZONE)
         completed_at = runner._final_snapshot_deadline(monitor_day) + timedelta(seconds=1)
 
         with TemporaryDirectory() as temporary_directory:
@@ -1174,7 +1190,7 @@ class DailyTradingRunnerTests(unittest.TestCase):
         self.assertNotEqual(final_record[runner.SIGNAL_COLUMNS[11]], runner.FINAL_MAX_DECLINE_STATUS)
         self.assertEqual(final_record[runner.SIGNAL_COLUMNS[12]], "")
 
-    def test_monitor_sends_each_new_trigger_and_the_0945_maximum_decline_report(self) -> None:
+    def test_monitor_sends_each_new_trigger_and_the_1005_maximum_decline_report(self) -> None:
         monitor_day = date(2026, 7, 28)
         prediction_day = date(2026, 7, 27)
         candidates = [
@@ -1194,16 +1210,16 @@ class DailyTradingRunnerTests(unittest.TestCase):
         final_snapshot = {
             "000001": runner.intraday.Quote(
                 "000001", runner.intraday.Decimal("9.20"), runner.intraday.Decimal("10"),
-                "2026-07-28 09:45:00",
+                "2026-07-28 10:05:00",
             ),
             "000002": runner.intraday.Quote(
                 "000002", runner.intraday.Decimal("9.00"), runner.intraday.Decimal("10"),
-                "2026-07-28 09:45:00",
+                "2026-07-28 10:05:00",
             ),
         }
         started_at = datetime(2026, 7, 28, 9, 28, tzinfo=runner.CHINA_TIMEZONE)
         first_observed_at = datetime(2026, 7, 28, 9, 28, tzinfo=runner.CHINA_TIMEZONE)
-        final_observed_at = datetime(2026, 7, 28, 9, 45, tzinfo=runner.CHINA_TIMEZONE)
+        final_observed_at = datetime(2026, 7, 28, 10, 5, tzinfo=runner.CHINA_TIMEZONE)
 
         with TemporaryDirectory() as temporary_directory:
             paths = runner.PipelinePaths(Path(temporary_directory))
@@ -1268,7 +1284,7 @@ class DailyTradingRunnerTests(unittest.TestCase):
         self.assertEqual(final_record["实时股票代码"], "000002")
         self.assertIn("已有 2 只候选股触发条件", final_record["备注"])
 
-    def test_monitor_sends_the_0945_maximum_decline_when_nothing_triggers(self) -> None:
+    def test_monitor_sends_the_1005_maximum_decline_when_nothing_triggers(self) -> None:
         monitor_day = date(2026, 7, 28)
         prediction_day = date(2026, 7, 27)
         candidates = [
@@ -1288,16 +1304,16 @@ class DailyTradingRunnerTests(unittest.TestCase):
         final_snapshot = {
             "000001": runner.intraday.Quote(
                 "000001", runner.intraday.Decimal("9.70"), runner.intraday.Decimal("10"),
-                "2026-07-28 09:45:00",
+                "2026-07-28 10:05:00",
             ),
             "000002": runner.intraday.Quote(
                 "000002", runner.intraday.Decimal("9.60"), runner.intraday.Decimal("10"),
-                "2026-07-28 09:45:00",
+                "2026-07-28 10:05:00",
             ),
         }
         started_at = datetime(2026, 7, 28, 9, 28, tzinfo=runner.CHINA_TIMEZONE)
         first_observed_at = datetime(2026, 7, 28, 9, 28, tzinfo=runner.CHINA_TIMEZONE)
-        final_observed_at = datetime(2026, 7, 28, 9, 45, tzinfo=runner.CHINA_TIMEZONE)
+        final_observed_at = datetime(2026, 7, 28, 10, 5, tzinfo=runner.CHINA_TIMEZONE)
 
         with TemporaryDirectory() as temporary_directory:
             paths = runner.PipelinePaths(Path(temporary_directory))
@@ -1361,7 +1377,7 @@ class DailyTradingRunnerTests(unittest.TestCase):
     def test_single_stock_monitor_budget_requires_unlimited_or_sufficient_quota(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             paths = runner.PipelinePaths(Path(temporary_directory))
-            with self.assertRaisesRegex(runner.PipelineError, "900"):
+            with self.assertRaisesRegex(runner.PipelineError, "1900"):
                 runner._validate_monitor_request_budget(
                     paths, 50, 60, use_batch=False
                 )
@@ -1382,7 +1398,7 @@ class DailyTradingRunnerTests(unittest.TestCase):
                 paths, 50, 60, use_batch=False
             )
 
-            self.assertEqual(requests_needed, 900)
+            self.assertEqual(requests_needed, 1900)
 
     def test_old_lock_owner_cannot_delete_a_replaced_lock(self) -> None:
         with TemporaryDirectory() as temporary_directory:

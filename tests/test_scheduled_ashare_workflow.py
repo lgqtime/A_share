@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pandas as pd
 
@@ -29,7 +29,7 @@ class ScheduledAshareWorkflowTests(unittest.TestCase):
                 )
 
         self.assertEqual(send.call_count, 2)
-        retry_sleep.assert_called_once_with(5.0)
+        retry_sleep.assert_called_once_with(10.0)
         self.assertEqual(logger.warning.call_count, 1)
         logger.error.assert_not_called()
 
@@ -46,9 +46,18 @@ class ScheduledAshareWorkflowTests(unittest.TestCase):
                         logger=logger,
                     )
 
-        self.assertEqual(send.call_count, 3)
-        self.assertEqual(retry_sleep.call_count, 2)
-        self.assertEqual(logger.warning.call_count, 3)
+        self.assertEqual(send.call_count, 6)
+        self.assertEqual(
+            retry_sleep.call_args_list,
+            [
+                call(10.0),
+                call(20.0),
+                call(40.0),
+                call(60.0),
+                call(90.0),
+            ],
+        )
+        self.assertEqual(logger.warning.call_count, 6)
         logger.error.assert_called_once()
 
     def test_send_pushplus_with_retry_persists_failures_to_workflow_log(self) -> None:
@@ -80,8 +89,8 @@ class ScheduledAshareWorkflowTests(unittest.TestCase):
             log_path = workflow.output_root(project) / "logs" / "scheduled_workflow_2026-08-05.log"
             log_content = log_path.read_text(encoding="utf-8")
 
-        self.assertIn("PushPlus send attempt 3/3 failed: network unavailable", log_content)
-        self.assertIn("PushPlus summary delivery failed after 3 attempts.", log_content)
+        self.assertIn("PushPlus send attempt 6/6 failed: network unavailable", log_content)
+        self.assertIn("PushPlus summary delivery failed after 6 attempts.", log_content)
 
     def test_previous_trading_day_skips_weekend_and_holiday(self) -> None:
         trade_dates = {
@@ -257,6 +266,179 @@ class ScheduledAshareWorkflowTests(unittest.TestCase):
         self.assertIn("000001", message)
         self.assertNotIn("买入候选", message)
 
+    def test_run_send_combined_uses_latest_valid_ai_output_from_scheduled_day(self) -> None:
+        scheduled_day = date(2026, 8, 3)
+        trade_day = date(2026, 7, 31)
+        logger = Mock()
+        with TemporaryDirectory() as temporary_directory:
+            project = Path(temporary_directory)
+            output_dir = workflow.day_output_dir(project, trade_day)
+            candidate_csv = output_dir / "风险过滤后得分前10.csv"
+            candidate_csv.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(
+                {
+                    "股票代码": [10, 11],
+                    "股票名称": ["风险候选", "另一风险候选"],
+                    "未满足条件（扣分项）": ["无", "换手率不足"],
+                }
+            ).to_csv(candidate_csv, index=False, encoding="utf-8-sig")
+            workflow.write_json(
+                output_dir / "data_preparation.json",
+                {
+                    "status": "completed",
+                    "trade_date": trade_day.isoformat(),
+                    "risk_filtered_top_ten_csv": str(candidate_csv),
+                },
+            )
+
+            current_run = project / "ai_agent_outputs" / "20260803" / "090510"
+            current_run.mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "股票代码": ["000010", "000002"],
+                    "股票名称": ["当天 AI 股票", "仅 AI 股票"],
+                    "主概念": ["算力", "机器人"],
+                    "个股得分": [8, 7],
+                    "模型结论": ["看好", "观察"],
+                    "风险等级": ["一般", "低"],
+                    "推荐等级": ["观察", "观察"],
+                    "关键风险": ["消息面波动", "业绩待验证"],
+                    "个股理由": ["不应进入推送的内部理由", "不应进入推送的内部理由"],
+                }
+            ).to_csv(current_run / "top10_recommendations.csv", index=False, encoding="utf-8-sig")
+            workflow.write_json(
+                current_run / "run_manifest.json",
+                {
+                    "run_at": "2026-08-03T09:05:10+08:00",
+                    "output_files": ["top10_recommendations.csv"],
+                },
+            )
+
+            invalid_newer_run = project / "ai_agent_outputs" / "20260803" / "091000"
+            invalid_newer_run.mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "股票代码": ["000003"],
+                    "股票名称": ["错误日期股票"],
+                    "主概念": ["错误概念"],
+                    "个股得分": [9],
+                    "模型结论": ["看好"],
+                    "风险等级": ["低"],
+                    "推荐等级": ["推荐"],
+                }
+            ).to_csv(
+                invalid_newer_run / "top10_recommendations.csv",
+                index=False,
+                encoding="utf-8-sig",
+            )
+            workflow.write_json(
+                invalid_newer_run / "run_manifest.json",
+                {
+                    "run_at": "2026-08-02T09:10:00+08:00",
+                    "output_files": ["top10_recommendations.csv"],
+                },
+            )
+
+            with patch.object(workflow, "scheduled_target_day", return_value=trade_day):
+                with patch.object(workflow, "send_pushplus") as send:
+                    result = workflow.run_send_combined(
+                        indicator_project=project,
+                        agent_project=project,
+                        scheduled_day=scheduled_day,
+                        dry_run=False,
+                        force=True,
+                        logger=logger,
+                    )
+
+            message = (output_dir / "pushplus_combined_message.html").read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        send.assert_called_once()
+        self.assertIn("风险候选", message)
+        self.assertIn("当天 AI 股票", message)
+        self.assertIn("关键风险", message)
+        self.assertIn("消息面波动", message)
+        self.assertNotIn("错误日期股票", message)
+        self.assertIn(
+            "<th>股票代码</th><th>股票名称</th><th>主概念</th><th>个股得分</th>"
+            "<th>模型结论</th><th>风险等级</th><th>推荐等级</th><th>关键风险</th>",
+            message,
+        )
+        self.assertNotIn("不应进入推送的内部理由", message)
+        intersection = message.split("<h3>当天 AI 与风险过滤候选交集：2026-08-03</h3>")[1]
+        self.assertIn("000010", intersection)
+        self.assertIn("当天 AI 股票", intersection)
+        self.assertIn("消息面波动", intersection)
+        self.assertIn("未满足条件（扣分项）", intersection)
+        self.assertNotIn("000002", intersection)
+
+    def test_run_send_combined_does_not_fall_back_to_prior_day_ai_output(self) -> None:
+        scheduled_day = date(2026, 8, 3)
+        trade_day = date(2026, 7, 31)
+        logger = Mock()
+        with TemporaryDirectory() as temporary_directory:
+            project = Path(temporary_directory)
+            output_dir = workflow.day_output_dir(project, trade_day)
+            candidate_csv = output_dir / "风险过滤后得分前10.csv"
+            candidate_csv.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(
+                {
+                    "股票代码": ["000010"],
+                    "股票名称": ["风险候选"],
+                    "未满足条件（扣分项）": ["无"],
+                }
+            ).to_csv(candidate_csv, index=False, encoding="utf-8-sig")
+            workflow.write_json(
+                output_dir / "data_preparation.json",
+                {
+                    "status": "completed",
+                    "trade_date": trade_day.isoformat(),
+                    "risk_filtered_top_ten_csv": str(candidate_csv),
+                },
+            )
+
+            historical_run = project / "ai_agent_outputs" / "20260802" / "090500"
+            historical_run.mkdir(parents=True)
+            pd.DataFrame(
+                {
+                    "股票代码": ["000001"],
+                    "股票名称": ["历史 AI 股票"],
+                    "主概念": ["旧概念"],
+                    "个股得分": [9],
+                    "模型结论": ["看好"],
+                    "风险等级": ["低"],
+                    "推荐等级": ["推荐"],
+                }
+            ).to_csv(
+                historical_run / "top10_recommendations.csv",
+                index=False,
+                encoding="utf-8-sig",
+            )
+            workflow.write_json(
+                historical_run / "run_manifest.json",
+                {
+                    "run_at": "2026-08-02T09:05:00+08:00",
+                    "output_files": ["top10_recommendations.csv"],
+                },
+            )
+
+            with patch.object(workflow, "scheduled_target_day", return_value=trade_day):
+                with patch.object(workflow, "send_pushplus") as send:
+                    result = workflow.run_send_combined(
+                        indicator_project=project,
+                        agent_project=project,
+                        scheduled_day=scheduled_day,
+                        dry_run=False,
+                        force=True,
+                        logger=logger,
+                    )
+                    sent_content = send.call_args.kwargs["content"]
+
+        self.assertEqual(result, 0)
+        send.assert_called_once()
+        self.assertIn("当天 AI 分析结果尚不可用", sent_content)
+        self.assertNotIn("历史 AI 股票", sent_content)
+
     def test_run_collect_records_empty_risk_filtered_candidate_file(self) -> None:
         scheduled_day = date(2026, 8, 3)
         trade_day = date(2026, 7, 31)
@@ -337,6 +519,29 @@ class ScheduledAshareWorkflowTests(unittest.TestCase):
         self.assertNotIn('New-WorkflowAction "analyze"', installer)
         self.assertNotIn('-At "04:00"', installer)
         self.assertNotIn("Register-ScheduledTask -TaskName $monitorTaskName", installer)
+
+    def test_installer_restarts_failed_summary_task_after_five_minutes(self) -> None:
+        installer = (
+            Path(workflow.__file__).resolve().parent / "install_daily_runner_tasks.ps1"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("-RestartInterval (New-TimeSpan -Minutes 5)", installer)
+
+    def test_installer_schedules_ai_analysis_and_combined_push_summary(self) -> None:
+        installer = (
+            Path(workflow.__file__).resolve().parent / "install_daily_runner_tasks.ps1"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('"A-Share Daily AI Evidence Analysis"', installer)
+        self.assertIn('"A-Share Daily Combined PushPlus Summary"', installer)
+        self.assertIn("function New-AiAgentAction", installer)
+        self.assertIn('New-WorkflowAction "send-combined"', installer)
+        self.assertIn('-At "09:05"', installer)
+        self.assertIn('-At "09:25"', installer)
+        self.assertIn('$retiredPushplusTaskName = "A-Share Daily PushPlus Summary"', installer)
+        self.assertIn("function Remove-RetiredPushplusSummaryTask", installer)
+        self.assertNotIn('New-WorkflowAction "send"', installer)
+        self.assertNotIn('-At "09:00"', installer)
 
 
 if __name__ == "__main__":
